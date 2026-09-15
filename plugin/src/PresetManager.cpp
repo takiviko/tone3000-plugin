@@ -21,16 +21,21 @@ constexpr const char* kFactoryPrefix = "factory:";
 // Android has no shared all-users install location the way the other
 // platforms' installers write to (see defaultSystemFactoryDir below), and a
 // security-scoped asset in the APK can't be exposed as a plain juce::File
-// path directly - so factory presets ride as APK assets
-// (android/app/src/main/assets/FactoryPresets/, populated from
-// resources/factory-presets/ at Gradle build time) and are copied out to
-// ordinary internal storage once, the first time they're needed. After that
-// they're just files like every other platform's Factory dir, including the
-// "a user-Factory file with the same stem wins" override contract described
-// in PresetManager.h. Re-extraction only happens if the destination is
-// missing or empty (e.g. a fresh install, or the user cleared app data) -
-// an app update that ships new/changed factory presets does not currently
-// refresh an already-populated destination.
+// path directly - so factory presets ride as APK assets, populated straight
+// from resources/factory-presets/ via an extra assets source dir in
+// android/app/build.gradle.kts (that directory's *contents* land at the APK
+// assets root, not nested under a subfolder - a Gradle Copy task into
+// src/main/assets/ was tried first and rejected: AGP's own lint tasks read
+// src/main/assets without an explicit task dependency on a Copy task
+// writing into it, which fails a real "implicit dependency" build
+// validation), and are copied out to ordinary internal storage once, the
+// first time they're needed. After that they're just files like every
+// other platform's Factory dir, including the "a user-Factory file with the
+// same stem wins" override contract described in PresetManager.h.
+// Re-extraction only happens if the destination is missing or empty (e.g. a
+// fresh install, or the user cleared app data) - an app update that ships
+// new/changed factory presets does not currently refresh an
+// already-populated destination.
 juce::File extractFactoryPresetsFromAssets() {
   const auto destDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
                             .getChildFile("TONE3000")
@@ -46,15 +51,21 @@ juce::File extractFactoryPresetsFromAssets() {
   if (assetManager == nullptr)
     return destDir;
 
-  AAssetDir* assetDir = AAssetManager_openDir(assetManager, "FactoryPresets");
+  // "" lists the APK assets root, where resources/factory-presets/'s
+  // contents land (see the Gradle-side comment above).
+  AAssetDir* assetDir = AAssetManager_openDir(assetManager, "");
   if (assetDir == nullptr)
     return destDir;
 
   destDir.createDirectory();
 
   while (const char* name = AAssetDir_getNextFileName(assetDir)) {
-    const juce::String assetPath = juce::String("FactoryPresets/") + name;
-    AAsset* asset = AAssetManager_open(assetManager, assetPath.toRawUTF8(), AASSET_MODE_BUFFER);
+    // The assets root could in principle carry non-preset files; only copy
+    // what PresetManager actually scans for.
+    if (!juce::String(name).endsWithIgnoreCase(".t3kpreset"))
+      continue;
+
+    AAsset* asset = AAssetManager_open(assetManager, name, AASSET_MODE_BUFFER);
     if (asset == nullptr)
       continue;
 

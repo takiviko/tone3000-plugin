@@ -90,17 +90,17 @@ android {
 // an installer nor a directly-readable bundle path, so they ride as APK
 // assets instead - PresetManager::extractFactoryPresetsFromAssets() (Android
 // branch, plugin/src/PresetManager.cpp) copies them out to internal storage
-// the first time they're needed. This task is the Android-side half of that:
-// copies resources/factory-presets/*.t3kpreset into
-// src/main/assets/FactoryPresets/ before assets get merged into the APK.
-// Unlike the iOS file(GLOB) (which reruns at every CMake reconfigure), this
-// Gradle Copy task reruns whenever its inputs change on every Gradle build,
-// so a new preset file needs no extra step beyond a normal build.
-val copyFactoryPresets by tasks.registering(Copy::class) {
-    from("../../resources/factory-presets")
-    include("*.t3kpreset")
-    into("src/main/assets/FactoryPresets")
-}
-
-tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
-    .configureEach { dependsOn(copyFactoryPresets) }
+// the first time they're needed.
+//
+// Registered as an extra assets source dir (resources/factory-presets/*
+// lands at the APK assets *root*, not nested under a FactoryPresets/
+// subfolder - extractFactoryPresetsFromAssets() lists the asset root
+// directly to match) rather than a custom Copy task into src/main/assets:
+// AGP's own sourceSets wiring tracks this correctly as a task input/output
+// dependency everywhere it matters (merge, lint, ...); an ad hoc Copy task
+// writing into the literal src/main/assets tree does not - every consumer
+// task would need its own explicit dependsOn (lint's
+// generateReleaseLintVitalReportModel included, confirmed the hard way: an
+// AGP "implicit dependency" validation failure on a real build with only
+// the merge*Assets tasks wired).
+android.sourceSets.getByName("main").assets.srcDirs("../../resources/factory-presets")

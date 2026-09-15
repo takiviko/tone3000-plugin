@@ -3,10 +3,70 @@
 #include <cstring>
 #include <limits>
 
+#if JUCE_ANDROID
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
+#endif
+
 namespace {
 
 constexpr const char* kUserPrefix = "user:";
 constexpr const char* kFactoryPrefix = "factory:";
+
+#if JUCE_ANDROID
+// Android has no shared all-users install location the way the other
+// platforms' installers write to (see defaultSystemFactoryDir below), and a
+// security-scoped asset in the APK can't be exposed as a plain juce::File
+// path directly - so factory presets ride as APK assets
+// (android/app/src/main/assets/FactoryPresets/, populated from
+// resources/factory-presets/ at Gradle build time) and are copied out to
+// ordinary internal storage once, the first time they're needed. After that
+// they're just files like every other platform's Factory dir, including the
+// "a user-Factory file with the same stem wins" override contract described
+// in PresetManager.h. Re-extraction only happens if the destination is
+// missing or empty (e.g. a fresh install, or the user cleared app data) -
+// an app update that ships new/changed factory presets does not currently
+// refresh an already-populated destination.
+juce::File extractFactoryPresetsFromAssets() {
+  const auto destDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                            .getChildFile("TONE3000")
+                            .getChildFile("Presets")
+                            .getChildFile("SystemFactory");
+
+  if (destDir.isDirectory() && destDir.getNumberOfChildFiles(juce::File::findFiles) > 0)
+    return destDir;
+
+  auto* env = juce::getEnv();
+  auto jAssetManager = env->CallObjectMethod(juce::getAppContext().get(), juce::AndroidContext.getAssets);
+  AAssetManager* assetManager = AAssetManager_fromJava(env, jAssetManager);
+  if (assetManager == nullptr)
+    return destDir;
+
+  AAssetDir* assetDir = AAssetManager_openDir(assetManager, "FactoryPresets");
+  if (assetDir == nullptr)
+    return destDir;
+
+  destDir.createDirectory();
+
+  while (const char* name = AAssetDir_getNextFileName(assetDir)) {
+    const juce::String assetPath = juce::String("FactoryPresets/") + name;
+    AAsset* asset = AAssetManager_open(assetManager, assetPath.toRawUTF8(), AASSET_MODE_BUFFER);
+    if (asset == nullptr)
+      continue;
+
+    const auto length = AAsset_getLength(asset);
+    const void* data = AAsset_getBuffer(asset);
+    if (data != nullptr) {
+      juce::File outFile = destDir.getChildFile(name);
+      outFile.replaceWithData(data, (size_t)length);
+    }
+    AAsset_close(asset);
+  }
+
+  AAssetDir_close(assetDir);
+  return destDir;
+}
+#endif
 
 // Magic prefix for the binary ValueTree preset format.
 constexpr char kPresetMagic[] = {'T', '3', 'K', 'B'};
@@ -54,6 +114,14 @@ juce::File PresetManager::defaultSystemFactoryDir() {
   // The tarball installs per-user (into factoryDir); this path is the hook
   // for system-wide/distro packaging.
   return juce::File("/usr/share/TONE3000/Presets/Factory");
+#elif JUCE_ANDROID
+  // No installer and no shared all-users location on Android either, same
+  // reasoning as iOS above - but unlike iOS's bundle (a real, directly
+  // readable juce::File path), an Android APK asset needs AAssetManager to
+  // read at all, so the presets are copied out to internal storage once
+  // (see extractFactoryPresetsFromAssets) rather than read from the asset
+  // path directly on every scan.
+  return extractFactoryPresetsFromAssets();
 #else
   return {};
 #endif

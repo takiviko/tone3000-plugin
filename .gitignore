@@ -11,10 +11,7 @@ build-android/
 android/local.properties
 android/.gradle/
 android/app/.cxx/
-# Copied in at build time from resources/factory-presets (see
-# copyFactoryPresets in android/app/build.gradle.kts) - that's the source of
-# truth, not this generated copy.
-android/app/src/main/assets/
+.idea/
 release-build/
 vs-build/
 output/

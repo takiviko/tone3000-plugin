@@ -984,25 +984,58 @@ if (EXISTS "${_juce_webview_java}")
         file(WRITE "${_juce_webview_java}" "${_juce_webview_java_src}")
         message(STATUS "Patched JUCE JuceWebView (Android): DOM storage enabled (source, for reference)")
     endif()
+
+    # setUseWideViewPort(true)/setLoadWithOverviewMode(true): without these,
+    # the <meta name=viewport> tag is ignored and CSS viewport units break
+    # outright. Confirmed live via Chrome DevTools Protocol against the
+    # running WebView (remote debugging is already enabled by JuceWebView's
+    # own setWebContentsDebuggingEnabled(true), forwarded with `adb forward
+    # tcp:<port> localabstract:webview_devtools_remote_<pid>`, found via
+    # `adb shell cat /proc/net/unix | grep devtools`): window.innerHeight,
+    # visualViewport.height and Page.getLayoutMetrics() all correctly
+    # reported an 800px-tall viewport, yet a freshly created div with
+    # `height: 100vh; position: fixed` measured 0px, and so did
+    # getComputedStyle(document.documentElement).height for `html { height:
+    # 100% }` - the exact CSS index.css's fixed-window rules depend on
+    # (T3K_FIXED_WINDOW below). screen.width (1280) disagreeing with
+    # window.outerWidth (1334) was the tell: the classic legacy/
+    # non-wide-viewport WebView mode. Same source-is-reference-only /
+    # bytecode-is-what-runs caveat as T3K_ANDROID_DOM_STORAGE above; folded
+    # into the same regenerated array below rather than a second one.
+    file(READ "${_juce_webview_java}" _juce_webview_java_src)
+    if (NOT _juce_webview_java_src MATCHES "T3K_ANDROID_WIDE_VIEWPORT")
+        string(REPLACE
+            "settings.setDomStorageEnabled (true); // T3K_ANDROID_DOM_STORAGE: window.localStorage/sessionStorage are null otherwise"
+            "settings.setDomStorageEnabled (true); // T3K_ANDROID_DOM_STORAGE: window.localStorage/sessionStorage are null otherwise\n            settings.setUseWideViewPort (true); // T3K_ANDROID_WIDE_VIEWPORT: without it, the <meta name=viewport> tag is ignored and CSS vh/percent-of-viewport heights resolve to 0\n            settings.setLoadWithOverviewMode (true); // T3K_ANDROID_WIDE_VIEWPORT: standard pairing for setUseWideViewPort"
+            _juce_webview_java_src "${_juce_webview_java_src}")
+        if (NOT _juce_webview_java_src MATCHES "T3K_ANDROID_WIDE_VIEWPORT")
+            message(FATAL_ERROR
+                "T3K_ANDROID_WIDE_VIEWPORT: failed to patch ${_juce_webview_java}. "
+                "The JUCE source layout likely changed in this version. Update the patch "
+                "anchor in CMakeLists.txt.")
+        endif()
+        file(WRITE "${_juce_webview_java}" "${_juce_webview_java_src}")
+        message(STATUS "Patched JUCE JuceWebView (Android): wide viewport enabled (source, for reference)")
+    endif()
 endif()
 
 set(_juce_webview_android_cpp "${LIB_DIR}/juce/modules/juce_gui_extra/native/juce_WebBrowserComponent_android.cpp")
 if (EXISTS "${_juce_webview_android_cpp}")
     file(READ "${_juce_webview_android_cpp}" _juce_webview_android_src)
-    if (NOT _juce_webview_android_src MATCHES "T3K_ANDROID_DOM_STORAGE_BYTECODE")
+    if (NOT _juce_webview_android_src MATCHES "T3K_ANDROID_WEBVIEW_BYTECODE")
         file(READ "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android-juce-webview-classes.dex.gz.inc" _t3k_webview_bytes)
         string(REGEX REPLACE
             "static const uint8 juceWebViewClasses\\[\\][^{]*\\{[^}]*\\}"
-            "static const uint8 juceWebViewClasses[] = // T3K_ANDROID_DOM_STORAGE_BYTECODE: regenerated from the DOM-storage-patched .java source; see cmake/android-juce-webview-classes.dex.gz.inc\n{\n${_t3k_webview_bytes}}"
+            "static const uint8 juceWebViewClasses[] = // T3K_ANDROID_WEBVIEW_BYTECODE: regenerated from the DOM-storage- and wide-viewport-patched .java source; see cmake/android-juce-webview-classes.dex.gz.inc\n{\n${_t3k_webview_bytes}}"
             _juce_webview_android_src "${_juce_webview_android_src}")
-        if (NOT _juce_webview_android_src MATCHES "T3K_ANDROID_DOM_STORAGE_BYTECODE")
+        if (NOT _juce_webview_android_src MATCHES "T3K_ANDROID_WEBVIEW_BYTECODE")
             message(FATAL_ERROR
-                "T3K_ANDROID_DOM_STORAGE_BYTECODE: failed to patch ${_juce_webview_android_cpp}. "
+                "T3K_ANDROID_WEBVIEW_BYTECODE: failed to patch ${_juce_webview_android_cpp}. "
                 "The JUCE source layout likely changed in this version. Update the patch "
                 "anchor in CMakeLists.txt.")
         endif()
         file(WRITE "${_juce_webview_android_cpp}" "${_juce_webview_android_src}")
-        message(STATUS "Patched JUCE WebBrowserComponent (Android): embedded classes.dex swapped for the DOM-storage-enabled build")
+        message(STATUS "Patched JUCE WebBrowserComponent (Android): embedded classes.dex swapped for the DOM-storage- and wide-viewport-enabled build")
     endif()
 endif()
 

@@ -19,20 +19,77 @@ let pendingTimer: number | undefined;
 
 /**
  * True in the iOS app, where native injects the flag at document start (see
- * the JUCE_IOS user script in EditorWebViewSetup.cpp). iOS is the only build
- * whose window is a fixed, full-screen box: there is no corner drag, no host
- * resize request, and the screen's aspect (4:3 on every iPad) is nothing like
- * the design box's 1024:578. Everywhere else this is false and the code below
- * behaves exactly as it always has.
+ * the JUCE_IOS user script in EditorWebViewSetup.cpp). Gates iOS-specific
+ * behavior that has nothing to do with window sizing: the Bluetooth-HFP
+ * sample-rate tip in AppBanner (iOS-only IosAudioRoute workaround) and the
+ * WKWebView touch-hold-as-contextmenu shim in GalleryBlock/useTouchHold
+ * (WKWebView never fires a native contextmenu for a touch hold; unverified
+ * whether Android's WebView needs the same treatment, so it isn't
+ * extended there). For the fixed-window layout handling both platforms
+ * actually share, see IS_FIXED_WINDOW below - don't add new iOS-only
+ * behavior here without checking whether it's really iOS-only.
  */
 export const IS_IOS =
   (window as unknown as { __T3K_PLATFORM__?: string }).__T3K_PLATFORM__ === 'ios';
 
-// Stylesheet hook for the iOS-only rules in index.css (the document-scroll
-// fix and the vertical centering). Set here rather than in a component so it
-// is on the element before the first paint, and set only on iOS, so every
-// other build's <html> carries no extra class.
-if (IS_IOS && typeof document !== 'undefined') document.documentElement.classList.add('t3k-ios');
+/** True in the Android app (see the JUCE_ANDROID user script in
+ * EditorWebViewSetup.cpp). */
+export const IS_ANDROID =
+  (window as unknown as { __T3K_PLATFORM__?: string }).__T3K_PLATFORM__ === 'android';
+
+/**
+ * True in any build whose window is a fixed, full-screen box: there is no
+ * corner drag, no host resize request, and the screen's aspect is nothing
+ * like the design box's 1024:578. iOS and Android both fit this (a
+ * fullscreen Activity has the same characteristics as iOS's fixed window);
+ * every desktop build does not. Gates the document-scroll fix and vertical
+ * centering in index.css (via the t3k-fixed-window class below).
+ *
+ * iOS and Android hit different shapes of the same underlying class of bug
+ * here, confirmed independently on each: WKWebView (iOS) resolves `height:
+ * 100%`/`100vh` to a slightly *wrong* definite value (a 25px
+ * clientHeight/scrollHeight mismatch - see index.css), which the CSS
+ * percentage chain alone fixes. Android's WebView is worse: confirmed live
+ * via Chrome DevTools Protocol against the running WebView (remote
+ * debugging is already on - JuceWebView calls
+ * setWebContentsDebuggingEnabled(true) unconditionally; forward the socket
+ * with `adb forward tcp:<port> localabstract:webview_devtools_remote_<pid>`,
+ * found via `adb shell cat /proc/net/unix | grep devtools`) that `height:
+ * 100%`/`100vh` resolve to a literal 0px on Android, even inside a fresh
+ * `position: fixed` test element with no ancestor involvement, and even
+ * though window.innerHeight/visualViewport.height/Page.getLayoutMetrics()
+ * all correctly report the true viewport size throughout. An *explicit
+ * pixel* height works correctly on the same elements. So the CSS percentage
+ * chain alone (sufficient for iOS) is not enough for Android - see the
+ * applyAndroidExplicitPixelHeight side effect below, which is the
+ * JS-computed-pixel-height workaround this Blink/WebView bug actually
+ * requires.
+ */
+export const IS_FIXED_WINDOW = IS_IOS || IS_ANDROID;
+
+// Stylesheet hook for the fixed-window rules in index.css (the
+// document-scroll fix and the vertical centering). Set here rather than in
+// a component so it is on the element before the first paint, and set only
+// where needed, so every desktop build's <html> carries no extra class.
+if (IS_FIXED_WINDOW && typeof document !== 'undefined')
+  document.documentElement.classList.add('t3k-fixed-window');
+
+// Android-only workaround for the percentage/vh-resolves-to-0 bug described
+// on IS_FIXED_WINDOW above: index.css's html/body height:100% rules can't
+// work on their own here, so set an explicit pixel height matching the real
+// (correctly-reported) viewport instead, and keep it in sync on resize.
+// Runs before first paint like the class-toggle above, not gated behind a
+// React effect. iOS is left on the pure-CSS fix (confirmed sufficient
+// there); revisit only if a case turns up where it isn't.
+if (IS_ANDROID && typeof document !== 'undefined' && typeof window !== 'undefined') {
+  const applyAndroidExplicitPixelHeight = () => {
+    const px = `${window.innerHeight}px`;
+    document.documentElement.style.height = px;
+    document.body.style.height = px;
+  };
+  applyAndroidExplicitPixelHeight();
+  window.addEventListener('resize', applyAndroidExplicitPixelHeight);
+}
 
 /**
  * True when the primary pointer is a finger (iPad, Android and Windows

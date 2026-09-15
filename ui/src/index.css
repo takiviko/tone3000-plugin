@@ -269,16 +269,21 @@ input[type='range'].accent-blue::-moz-range-thumb {
   display: none; /* Chrome, Safari, Opera */
 }
 
-/* iOS: the document itself never scrolls.
+/* Fixed-window builds (iOS and Android - see IS_FIXED_WINDOW in
+   useUiScale.ts): the document itself never scrolls.
 
-   `100vh` is not the viewport here. This WKWebView lays out in a 1366x999
-   box while `100vh` / `100dvh` / `innerHeight` / `visualViewport.height` all
-   report 1024, the screen height: measured on the iPad Pro 12.9 Simulator,
-   documentElement.clientHeight was 999 against a scrollHeight of 1024. So
-   `#root { height: 100vh }` built a root 25 px taller than the box that holds
-   it, html and body kept `overflow: visible`, and the whole document became
-   scrollable by exactly that 25 px. Every screen inherited it: a vertical
-   swipe anywhere shifted the entire UI, header and faceplate included.
+   `100vh` is not the viewport here. On iOS, this WKWebView lays out in a
+   1366x999 box while `100vh` / `100dvh` / `innerHeight` /
+   `visualViewport.height` all report 1024, the screen height: measured on
+   the iPad Pro 12.9 Simulator, documentElement.clientHeight was 999 against
+   a scrollHeight of 1024. So `#root { height: 100vh }` built a root 25 px
+   taller than the box that holds it, html and body kept `overflow:
+   visible`, and the whole document became scrollable by exactly that 25 px.
+   Every screen inherited it: a vertical swipe anywhere shifted the entire
+   UI, header and faceplate included. Android's WebView hits the same class
+   of clientHeight/viewport mismatch (confirmed: without this rule the
+   booted UI rendered as a blank screen, the same bug in a different
+   costume), hence generalizing this from an iOS-only rule.
 
    `overscroll-behavior: none` above did not stop it, and could not: it
    suppresses rubber-band on a scroll that has nowhere to go, and this scroll
@@ -290,8 +295,8 @@ input[type='range'].accent-blue::-moz-range-thumb {
    impossible rather than merely unnecessary. Inner containers (the Select
    Tone results, Settings, the preset list, the lane) keep their own
    scrollers and are untouched. */
-html.t3k-ios,
-html.t3k-ios body {
+html.t3k-fixed-window,
+html.t3k-fixed-window body {
   height: 100%;
   overflow: hidden;
 }
@@ -299,9 +304,9 @@ html.t3k-ios body {
 /* The design box centers in the leftover height instead of leaving all the
    slack at the bottom. #root is top-anchored on desktop only because the
    window height transiently disagrees with the design box while a chrome
-   strip toggles (see the #root rule above); the iOS window never resizes,
+   strip toggles (see the #root rule above); a fixed window never resizes,
    so that transient cannot happen here. */
-html.t3k-ios #root {
+html.t3k-fixed-window #root {
   height: 100%;
   justify-content: center;
 }

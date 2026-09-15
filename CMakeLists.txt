@@ -50,6 +50,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT T3K_IOS)
         "for the deployment-target floor.")
 endif()
 
+# Android: unlike T3K_IOS, this has no deployment-target floor that must be
+# forced into the cache before project() (CMAKE_OSX_DEPLOYMENT_TARGET has no
+# Android equivalent), so CMAKE_SYSTEM_NAME is read here, after project(),
+# rather than needing the iOS block's pre-project() timing above. The NDK's
+# own android.toolchain.cmake (passed via CMAKE_TOOLCHAIN_FILE, which the
+# Gradle externalNativeBuild integration sets automatically) resolves
+# CMAKE_SYSTEM_NAME=Android well before this point.
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    set(T3K_ANDROID TRUE)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
 
@@ -816,7 +827,8 @@ enable_testing() # Allow running build tests
 add_subdirectory(plugin) # Add plugin project
 # The DSP suite is a host-run console binary (it reads test assets off the
 # build machine's disk and is driven by script/test-dsp.sh). Cross-compiling it
-# for iOS produces something that cannot be run, so keep it out of that build.
-if (NOT T3K_IOS)
+# for iOS or Android produces something that cannot be run, so keep it out of
+# those builds.
+if (NOT T3K_IOS AND NOT T3K_ANDROID)
     add_subdirectory(test)   # DSP test suite (DspTests, see script/test-dsp.sh)
 endif()

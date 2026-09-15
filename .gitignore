@@ -7,6 +7,14 @@ build-arm64/
 build-x86_64/
 build-ios/
 build-ios-device/
+build-android/
+android/local.properties
+android/.gradle/
+android/app/.cxx/
+# Copied in at build time from resources/factory-presets (see
+# copyFactoryPresets in android/app/build.gradle.kts) - that's the source of
+# truth, not this generated copy.
+android/app/src/main/assets/
 release-build/
 vs-build/
 output/

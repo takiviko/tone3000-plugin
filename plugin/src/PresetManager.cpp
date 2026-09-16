@@ -32,17 +32,22 @@ constexpr const char* kFactoryPrefix = "factory:";
 // first time they're needed. After that they're just files like every
 // other platform's Factory dir, including the "a user-Factory file with the
 // same stem wins" override contract described in PresetManager.h.
-// Re-extraction only happens if the destination is missing or empty (e.g. a
-// fresh install, or the user cleared app data) - an app update that ships
-// new/changed factory presets does not currently refresh an
-// already-populated destination.
+// Re-extraction only happens if the destination hasn't been *fully*
+// extracted before (e.g. a fresh install, the user cleared app data, or the
+// process was killed mid-extraction) - an app update that ships new/changed
+// factory presets does not currently refresh an already-populated
+// destination. Completion is tracked with a marker file rather than "the
+// directory is non-empty": the latter would treat a run cut short partway
+// through the loop below (low memory, user swipe-away) as done, silently
+// stranding a partial preset set with no retry short of clearing app data.
 juce::File extractFactoryPresetsFromAssets() {
   const auto destDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
                             .getChildFile("TONE3000")
                             .getChildFile("Presets")
                             .getChildFile("SystemFactory");
+  const auto extractionCompleteMarker = destDir.getChildFile(".extraction-complete");
 
-  if (destDir.isDirectory() && destDir.getNumberOfChildFiles(juce::File::findFiles) > 0)
+  if (extractionCompleteMarker.existsAsFile())
     return destDir;
 
   auto* env = juce::getEnv();
@@ -79,6 +84,7 @@ juce::File extractFactoryPresetsFromAssets() {
   }
 
   AAssetDir_close(assetDir);
+  extractionCompleteMarker.create();
   return destDir;
 }
 #endif

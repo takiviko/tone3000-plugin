@@ -689,6 +689,7 @@ std::vector<uint8_t> TONE3000Processor::fetchModelFromUrl(const juce::String& mo
   // attempts included, instead.
   const juce::uint32 overallDeadline = juce::Time::getMillisecondCounter() + 120000;
 
+#if JUCE_ANDROID
   // Android's stock JUCE HTTP backend has been confirmed live on a Galaxy S25
   // to silently stop delivering bytes partway through this specific
   // `model_url` download (itself a redirect: the API 302s to a
@@ -706,6 +707,14 @@ std::vector<uint8_t> TONE3000Processor::fetchModelFromUrl(const juce::String& mo
   // actually stopped, repeating until the server itself confirms there's
   // nothing left (416) rather than trusting any single read to have reached
   // the real end. The CDN advertises Accept-Ranges: bytes, confirmed live.
+  //
+  // Scoped to Android only: desktop/iOS's libcurl-based backend doesn't have
+  // this bug (isExhausted() there is a real signal), and probing an
+  // already-complete download with an extra Range request would cost every
+  // successful load one avoidable extra round trip there for no benefit -
+  // or, on a server that mishandles an at-end Range by ignoring it (a 200
+  // instead of 416), a full second download of the whole file.
+  bool confirmedComplete = false;
   constexpr int kMaxResumeAttempts = 6;
   for (int resumeAttempt = 0; resumeAttempt <= kMaxResumeAttempts; ++resumeAttempt) {
     const size_t bytesBeforeThisRequest = memoryBlock.getSize();
@@ -735,8 +744,10 @@ std::vector<uint8_t> TONE3000Processor::fetchModelFromUrl(const juce::String& mo
 
     // 416 on a resume request means the server itself confirms there's
     // nothing past what's already been downloaded - done.
-    if (bytesBeforeThisRequest > 0 && status == 416)
+    if (bytesBeforeThisRequest > 0 && status == 416) {
+      confirmedComplete = true;
       break;
+    }
 
     if (status != 200 && status != 206) {
       juce::Logger::writeToLog("[ModelLoader] Model URL returned HTTP " + juce::String(status) +
@@ -753,10 +764,12 @@ std::vector<uint8_t> TONE3000Processor::fetchModelFromUrl(const juce::String& mo
     if (bytesBeforeThisRequest > 0 && status == 200)
       memoryBlock.reset();
 
+    bool timedOut = false;
     while (!stream.isExhausted()) {
       if (juce::Time::getMillisecondCounter() > overallDeadline) {
         juce::Logger::writeToLog("[ModelLoader] Model download timed out: " + modelUrl);
-        return {};
+        timedOut = true;
+        break;
       }
       int bytesRead = stream.read(buffer, (int)blockSize);
       if (bytesRead > 0) {
@@ -771,12 +784,50 @@ std::vector<uint8_t> TONE3000Processor::fetchModelFromUrl(const juce::String& mo
       }
     }
 
+    // A timeout keeps whatever was salvaged rather than discarding it, same
+    // as every other exit path above - a stalled resume isn't different from
+    // a resume connect failure in that respect.
+    if (timedOut)
+      break;
+
     // No forward progress on this attempt: further resume attempts would
     // just repeat it (or spin), so stop instead of burning the remaining
     // attempt budget.
     if (memoryBlock.getSize() == bytesBeforeThisRequest)
       break;
   }
+
+  if (!confirmedComplete && memoryBlock.getSize() > 0) {
+    juce::Logger::writeToLog(
+        "[ModelLoader] Gave up resuming without the server confirming completion via 416 (got " +
+        juce::String(memoryBlock.getSize()) + " bytes) - result may still be truncated: " +
+        modelUrl);
+  }
+#else
+  auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                     .withConnectionTimeoutMs(30000)
+                     .withExtraHeaders(authHeader);
+
+  std::unique_ptr<juce::InputStream> stream(url.createInputStream(options));
+
+  if (!stream) {
+    juce::Logger::writeToLog("[ModelLoader] Failed to open stream for model URL (network down or "
+                             "unreachable): " + modelUrl);
+    return {};
+  }
+
+  while (!stream->isExhausted()) {
+    if (juce::Time::getMillisecondCounter() > overallDeadline) {
+      juce::Logger::writeToLog("[ModelLoader] Model download timed out: " + modelUrl);
+      return {};
+    }
+    int bytesRead = stream->read(buffer, (int)blockSize);
+    if (bytesRead > 0)
+      memoryBlock.append(buffer, bytesRead);
+    else
+      break;
+  }
+#endif
 
   if (memoryBlock.getSize() == 0) {
     juce::Logger::writeToLog("[ModelLoader] Downloaded 0 bytes from model URL: " + modelUrl);

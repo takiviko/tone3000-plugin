@@ -302,6 +302,21 @@ if (T3K_ANDROID AND TARGET ${PROJECT_NAME}_Standalone)
         C_VISIBILITY_PRESET default
     )
 
+    # NDK 27's linker still defaults to 4 KB-aligned ELF LOAD segments; newer
+    # Android devices (and the Play Store from November 2025) require 16 KB
+    # page-size compatibility instead. Confirmed live on a Galaxy S25 (One UI
+    # 7): installing and launching this Standalone .so with the default
+    # alignment surfaced Android's own "Android app compatibility" warning
+    # dialog, naming this exact library ("lib/arm64-v8a/libjuce_jni.so: LOAD
+    # segment not aligned") - the emulator never surfaced this, since it
+    # doesn't enforce the check. Standard fix per
+    # https://developer.android.com/16kb-page-size: pass max-page-size=16384
+    # to the linker. NDK r28+ defaults to this; since NDK is pinned to r27
+    # here (see the Oboe/AAudio.h NDK 30 conflict noted on ndkVersion in
+    # android/app/build.gradle.kts), it has to be requested explicitly rather
+    # than solved by an NDK bump.
+    target_link_options(${PROJECT_NAME}_Standalone PRIVATE "-Wl,-z,max-page-size=16384")
+
     # JuceActivity.java (JUCE's stock Android activity, used as-is - see
     # android/ Gradle project) unconditionally declares native
     # appOnResume()/appNewIntent() methods, but JUCE only compiles their C++

@@ -2,10 +2,30 @@
 #include "Processor.h"
 
 void TONE3000Editor::parentHierarchyChanged() {
-  // iOS runs the standalone window in kiosk mode: it is already exactly the
-  // screen, has no title bar to flip on and cannot be resized, so the whole
-  // size-preserving dance below has nothing to correct.
-#if ! JUCE_IOS
+#if JUCE_ANDROID
+  // Correct the construction-time design-size guess (see the constructor)
+  // now that we're actually parented. Desktop::getDisplays() isn't populated
+  // yet at construction time (confirmed live: querying it there always
+  // returned null), but reliably is by the time parentHierarchyChanged()
+  // first fires. getTopLevelComponent()'s own bounds are NOT a reliable
+  // substitute, even though the window (StandaloneFilterWindow) does call
+  // setFullScreen(true) on itself before this editor even exists: confirmed
+  // live that this callback can fire before that has taken visible effect on
+  // the peer (topBounds read back as a bogus 128x128 placeholder), and can
+  // also fire while getTopLevelComponent() still resolves to
+  // MainContentComponent rather than the window itself (mid-construction,
+  // before MainContentComponent has been handed to the window via
+  // setContentOwned) - in both cases it fed back our own already-wrong
+  // design-size guess instead of correcting it.
+  if (auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+    setSize(juce::roundToInt(display->userBounds.getWidth()),
+            juce::roundToInt(display->userBounds.getHeight()));
+#endif
+
+  // iOS and Android both run the standalone window in kiosk mode: it is
+  // already exactly the screen, has no title bar to flip on and cannot be
+  // resized, so the whole size-preserving dance below has nothing to correct.
+#if ! JUCE_IOS && ! JUCE_ANDROID
   if (auto* window = dynamic_cast<juce::DocumentWindow*>(getTopLevelComponent())) {
     // Snapshot our own size before flipping the title bar style: JUCE
     // immediately relayouts the title-bar/content split within the window's
@@ -49,7 +69,7 @@ void TONE3000Editor::parentHierarchyChanged() {
       peer->setCurrentRenderingEngine(0);
 #endif
   }
-#endif  // ! JUCE_IOS
+#endif  // ! JUCE_IOS && ! JUCE_ANDROID
 
 #if JUCE_MAC
   // DAW hosts own the plugin's NSWindow and usually leave mouse-moved events
@@ -121,22 +141,35 @@ TONE3000Editor::TONE3000Editor(TONE3000Processor& p) : AudioProcessorEditor(&p),
   // Grow-only resizing: corner/edge drags scale the whole window between the
   // 1024x578 design size and kMaxScale times it, aspect-locked. Restore the
   // session's scale (persisted via the processor; see ProcessorState.cpp).
-#if JUCE_IOS
-  // iOS gets one fixed, full-screen window: no corner drags, no host resize
-  // request, no persisted scale. Installing the aspect-locked constrainer here
-  // is not merely useless, it is harmful: the kiosk-mode window applies it to
-  // the screen bounds, and on a 4:3 iPad the 1024:578 lock resolves by height,
-  // making the editor ~1814pt wide inside a 1366pt screen and clipping a third
-  // of the UI off the right edge. Take the size the window gives us instead and
-  // let the web UI letterbox its 1024x578 design box into it (useUiScale),
-  // which is the same path a host that refuses a resize already exercises.
+#if JUCE_IOS || JUCE_ANDROID
+  // iOS and Android both get one fixed, full-screen window: no corner drags,
+  // no host resize request, no persisted scale. Installing the aspect-locked
+  // constrainer here is not merely useless, it is harmful: the kiosk-mode
+  // window applies it to the screen bounds, and on a 4:3 iPad (or a phone in
+  // landscape) the 1024:578 lock resolves by height, making the editor wider
+  // than the physical screen and clipping a chunk of the UI off the right and
+  // bottom edges - confirmed live on a phone-class Android device, which this
+  // branch previously excluded (it only checked JUCE_IOS, so Android fell
+  // into the desktop #else below and sized itself from a persisted
+  // editorScale meant for a resizable desktop window, not a fixed kiosk one).
+  // Take the size the window gives us instead and let the web UI letterbox
+  // its 1024x578 design box into it (useUiScale), which is the same path a
+  // host that refuses a resize already exercises.
   //
   // Still start at the design size and with the persisted chrome height, as
   // every other platform does: an editor that is 0x0 until the kiosk window
   // hands it bounds makes the UI's first scale calculation divide by a zero
   // viewport, and totalHeight() is read before the web UI reports its own
   // extra height back.
-  extraContentHeight = juce::jlimit(0, 160, processor.editorExtraHeight.load());
+  // Unlike iOS, Android's ComponentPeer::setBounds() (see
+  // juce_Windowing_android.cpp) honors whatever size we ask for literally -
+  // there is no OS-level override that hands the real screen bounds back to
+  // us the way UIKit does for iOS's root view controller. So this starting
+  // size sticks on Android until parentHierarchyChanged() below corrects it
+  // once the real screen size is available (Desktop::getDisplays() isn't
+  // reliably populated yet this early - confirmed live on a Galaxy S25,
+  // where querying it here always returned null, silently falling through to
+  // this same design-size guess and reproducing the "chopped" UI bug).
   setSize(kWidth, totalHeight());
   setResizable(false, false);
 #else
@@ -154,7 +187,7 @@ TONE3000Editor::TONE3000Editor(TONE3000Processor& p) : AudioProcessorEditor(&p),
   extraContentHeight = juce::jlimit(0, 160, processor.editorExtraHeight.load());
   updateResizeConstraints();
   applyScaledSize(savedScale);
-#endif  // JUCE_IOS
+#endif  // JUCE_IOS || JUCE_ANDROID
 }
 
 void TONE3000Editor::applyScaledSize(double scale) {
@@ -177,11 +210,11 @@ void TONE3000Editor::setExtraContentHeight(int pixels, int persistentPixels) {
   // The UI reports design-space pixels; the window change is scaled.
   // Generous ceiling: banner (~44) + hint bar (~36) with headroom to spare.
   const int clamped = juce::jlimit(0, 160, pixels);
-#if JUCE_IOS
-  // The iOS window is the screen; it cannot grow to make room for a chrome
-  // strip. Record the persistent portion for symmetry and let the web UI
-  // shrink the design box to fit, exactly as it does for a host that refuses
-  // the resize.
+#if JUCE_IOS || JUCE_ANDROID
+  // The iOS/Android window is the screen; it cannot grow to make room for a
+  // chrome strip. Record the persistent portion for symmetry and let the web
+  // UI shrink the design box to fit, exactly as it does for a host that
+  // refuses the resize.
   processor.editorExtraHeight.store(juce::jlimit(0, 160, persistentPixels));
   extraContentHeight = clamped;
 #else
@@ -206,7 +239,7 @@ void TONE3000Editor::setExtraContentHeight(int pixels, int persistentPixels) {
     c->setFixedAspectRatio(static_cast<double>(kWidth) / totalHeight());
   }
   applyScaledSize(scale);
-#endif  // JUCE_IOS
+#endif  // JUCE_IOS || JUCE_ANDROID
 }
 
 void TONE3000Editor::timerCallback() {
@@ -357,10 +390,10 @@ void TONE3000Editor::resized() {
     mainWebView->setBounds(getLocalBounds());
   // Skip persisting while we're correcting our own size rather than
   // reflecting one the user (or host) actually chose; see restoringSize.
-  // No user- or host-chosen scale exists on iOS (the window is the screen),
-  // so there is nothing to persist and currentScale() would just record the
-  // screen aspect.
-#if ! JUCE_IOS
+  // No user- or host-chosen scale exists on iOS/Android (the window is the
+  // screen), so there is nothing to persist and currentScale() would just
+  // record the screen aspect.
+#if ! JUCE_IOS && ! JUCE_ANDROID
   if (!restoringSize)
     processor.editorScale.store(currentScale());
 #endif

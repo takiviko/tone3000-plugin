@@ -750,30 +750,20 @@ std::vector<uint8_t> TONE3000Processor::fetchModelFromUrl(const juce::String& mo
   const juce::uint32 overallDeadline = juce::Time::getMillisecondCounter() + 120000;
 
 #if JUCE_ANDROID
-  // Android's stock JUCE HTTP backend has been confirmed live on a Galaxy S25
-  // to silently stop delivering bytes partway through this specific
-  // `model_url` download (itself a redirect: the API 302s to a
-  // Cloudflare-fronted storage URL) well short of the real end of the
-  // response - repeatably, at the exact same byte offset across separate
-  // fresh connections, while an independent `curl` fetch of the same URL
-  // reliably retrieves the complete file every time. Two things rule out the
-  // usual detection/recovery tools: isExhausted() for a plain HTTP(S) URL is
-  // hardcoded to always return false on Android, so it can't signal
-  // completion; and getTotalLength() reports the *redirect* response's
-  // Content-Length (commonly 0, an empty redirect body), not the followed
-  // target's, so it can't be used to detect the shortfall either. Without a
-  // pinned root cause, the robust fix is the one browsers/download managers
-  // use for any unreliable transfer: range-resume from wherever the stream
-  // actually stopped, repeating until the server itself confirms there's
-  // nothing left (416) rather than trusting any single read to have reached
-  // the real end. The CDN advertises Accept-Ranges: bytes, confirmed live.
+  // Android's stock JUCE HTTP backend has no reliable way to detect a short
+  // read on a plain HTTP(S) URL: isExhausted() always returns false, and
+  // getTotalLength() reflects the initial response's Content-Length - here
+  // always 0, since `model_url` itself redirects to the real file, not the
+  // redirected target's. A connection that stops delivering bytes early is
+  // therefore indistinguishable from a real completion. Work around it by
+  // range-resuming from wherever the stream stopped, repeating until the
+  // server confirms via 416 that nothing is left, instead of trusting a
+  // single read to have reached the end.
   //
-  // Scoped to Android only: desktop/iOS's libcurl-based backend doesn't have
-  // this bug (isExhausted() there is a real signal), and probing an
-  // already-complete download with an extra Range request would cost every
-  // successful load one avoidable extra round trip there for no benefit -
-  // or, on a server that mishandles an at-end Range by ignoring it (a 200
-  // instead of 416), a full second download of the whole file.
+  // Scoped to Android only: desktop/iOS's backend signals completion
+  // correctly, so this would just add an unnecessary extra request per
+  // download there - or, on a server that returns 200 instead of 416 for an
+  // at-end Range request, a full duplicate download.
   bool confirmedComplete = false;
   constexpr int kMaxResumeAttempts = 6;
   for (int resumeAttempt = 0; resumeAttempt <= kMaxResumeAttempts; ++resumeAttempt) {
@@ -844,9 +834,8 @@ std::vector<uint8_t> TONE3000Processor::fetchModelFromUrl(const juce::String& mo
       }
     }
 
-    // A timeout keeps whatever was salvaged rather than discarding it, same
-    // as every other exit path above - a stalled resume isn't different from
-    // a resume connect failure in that respect.
+    // Keep whatever was salvaged on timeout too, consistent with the other
+    // exit paths above.
     if (timedOut)
       break;
 

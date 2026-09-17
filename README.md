@@ -188,6 +188,35 @@ device without any conversions") open the card exclusively, which takes the
 whole interface away from every other app while the standalone runs. The
 JACK driver shares it.
 
+## Android
+
+A Standalone-only build (Android has no plugin host): `android/` is a
+hand-rolled Gradle project whose `externalNativeBuild` points at this repo's
+own `CMakeLists.txt`, not a Projucer-generated project. v1 scope is tablet,
+landscape-only, sharing the iOS port's fixed-aspect UI.
+
+Prerequisites: Android Studio (or the SDK + NDK 27.2.12479018, pinned in
+`android/app/build.gradle.kts` — newer NDKs conflict with JUCE's vendored
+Oboe copy) and a JDK 17+ on `JAVA_HOME` for the Gradle wrapper (Android
+Studio's bundled JBR works; the wrapper itself pins the matching Gradle
+9.7.1, no separate Gradle install needed).
+
+Build the UI first (steps 2–3 above; the publishable key and `RECORD_AUDIO`/
+`INTERNET` permissions still apply), then open `android/` in Android Studio
+and run, or from the CLI:
+
+```sh
+cd android
+./gradlew assembleRelease   # Windows: gradlew.bat
+```
+
+The APK lands in `android/app/build/outputs/apk/release/`, unsigned — sign
+it (e.g. `apksigner` with a debug keystore) before installing. If a build
+doesn't pick up a UI-only change, delete `android/app/.cxx` to force a fresh
+CMake configure. A cold `libs/juce` fetch can occasionally fail with a
+"Failed to remove directory" error when both ABIs configure at once; retry,
+or build one ABI at a time with `-Pandroid.injected.build.abi=arm64-v8a`.
+
 ## Audio processing
 
 The plugin is a JUCE processor running a chain of NAM and IR blocks, anchored
@@ -343,6 +372,7 @@ Debug`.
 | `plugin/`       | C++ plugin: processor, DSP, editor, webview bridge; vendors NeuralAmpModelerCore and AudioDSPTools |
 | `plugin/docs/`  | Design docs (spread, oversampling, multi-core, local models) |
 | `ui/`           | React/TypeScript UI (see [ui/README.md](ui/README.md))|
+| `android/`      | Gradle project for the Android Standalone build       |
 | `test/`         | GoogleTest DSP suite + test assets                    |
 | `script/`       | Build, packaging, and install helpers                 |
 | `libs/`         | CPM-fetched dependencies (JUCE, GoogleTest, ...)      |

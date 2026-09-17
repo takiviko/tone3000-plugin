@@ -8,9 +8,15 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- mipmap-*/ic_launcher(_round).png are plugin/icon/icon.png (same
+         full-bleed square iOS/Windows use) resized to 48/72/96/144/192px;
+         regenerate from that source if it changes, no build-time step does
+         this automatically. -->
     <application
         android:name="com.rmsl.juce.JuceApp"
         android:label="TONE3000"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
         android:hardwareAccelerated="true">
 

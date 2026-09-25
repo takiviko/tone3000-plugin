@@ -229,7 +229,8 @@ All in `plugin/CMakeLists.txt` unless noted; each has a longer comment there.
 - The DSP test suite and `NeuralAmpModelerCore`'s own CMake project are
   skipped, as on iOS.
 - `android/app/build.gradle.kts` compiles JUCE's Java glue (`JuceApp`,
-  `JuceActivity`, ...) straight out of `libs/juce`, and orders Java
+  `JuceActivity`, ...) straight out of `libs/juce`, next to the app's own
+  `MainActivity`/`AudioSessionService` in `android/app/src/main/java`, and orders Java
   compilation after the CMake configure that fetches and patches that tree.
 
 ## JUCE patches
@@ -284,6 +285,17 @@ token exchange failed with `token_exchange_failed` until both were in.
   page's `window.close()` closes the tab, since Chrome lets a page close a tab
   another app opened. What stays on screen is an empty new tab: expected, not
   a failure. Switch back to the app.
+- **Audio keeps running with the screen locked.** `MainActivity` (a thin
+  `JuceActivity` subclass in `android/app/src/main/java`) starts
+  `AudioSessionService`, a foreground service of type `microphone`, on every
+  resume once `RECORD_AUDIO` is granted. Without it Android 11+ feeds a
+  backgrounded app silence from the microphone and drops the process to
+  background priority. The service does no work of its own; it shows an
+  ongoing "TONE3000 is running" notification and stops when the app is
+  finished or swiped out of Recents. On Android 13+ the notification only
+  appears if notifications are allowed; `MainActivity` asks once per
+  install, right after the microphone is granted. Declining hides the
+  notification but the service works either way.
 - Space/Enter passthrough is a no-op (`WindowKeyEvents.cpp`): the app is its
   own host.
 

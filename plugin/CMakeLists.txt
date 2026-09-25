@@ -314,8 +314,10 @@ if (T3K_ANDROID AND TARGET ${PROJECT_NAME}_Standalone)
     # than solved by an NDK bump.
     target_link_options(${PROJECT_NAME}_Standalone PRIVATE "-Wl,-z,max-page-size=16384")
 
-    # JuceActivity.java (JUCE's stock Android activity, used as-is - see
-    # android/ Gradle project) unconditionally declares native
+    # JuceActivity.java (JUCE's stock Android activity, which the app's
+    # MainActivity only subclasses - see android/ Gradle project; the natives
+    # stay registered on JuceActivity, the class that declares them)
+    # unconditionally declares native
     # appOnResume()/appNewIntent() methods, but JUCE only compiles their C++
     # implementation (juce_Windowing_android.cpp, part of the juce_gui_basics
     # module) when JUCE_PUSH_NOTIFICATIONS_ACTIVITY names the activity's JNI

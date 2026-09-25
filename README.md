@@ -165,17 +165,20 @@ JACK driver shares it.
 A Standalone-only build (Android has no plugin host): `android/` is a
 hand-rolled Gradle project whose `externalNativeBuild` points at this repo's
 own `CMakeLists.txt`, not a Projucer-generated project. v1 scope is tablet,
-landscape-only, sharing the iOS port's fixed-aspect UI.
+landscape-only, sharing the iOS port's fixed-aspect UI. See
+[`docs/android.md`](docs/android.md) for per-OS prerequisites, signing,
+installing and debugging.
 
 Prerequisites: Android Studio (or the SDK + NDK 27.2.12479018, pinned in
 `android/app/build.gradle.kts` — newer NDKs conflict with JUCE's vendored
 Oboe copy) and a JDK 17+ on `JAVA_HOME` for the Gradle wrapper (Android
 Studio's bundled JBR works; the wrapper itself pins the matching Gradle
-9.7.1, no separate Gradle install needed).
+9.7.1, no separate Gradle install needed). On Linux build hosts, JUCE's
+host-side `juceaide` helper also needs `pkg-config`, `libfreetype-dev` and
+`libfontconfig1-dev`.
 
-Build the UI first (steps 2–3 above; the publishable key and `RECORD_AUDIO`/
-`INTERNET` permissions still apply), then open `android/` in Android Studio
-and run, or from the CLI:
+Set the publishable key in the repo-root `.env` (step 3 above), then open
+`android/` in Android Studio and run, or from the CLI:
 
 ```sh
 cd android
@@ -184,7 +187,7 @@ cd android
 
 The APK lands in `android/app/build/outputs/apk/release/`, unsigned — sign
 it (e.g. `apksigner` with a debug keystore) before installing. If a build
-doesn't pick up a UI-only change, delete `android/app/.cxx` to force a fresh
+doesn't pick up a `.env` change, delete `android/app/.cxx` to force a fresh
 CMake configure. A cold `libs/juce` fetch can occasionally fail with a
 "Failed to remove directory" error when both ABIs configure at once; retry,
 or build one ABI at a time with `-Pandroid.injected.build.abi=arm64-v8a`.

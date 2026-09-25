@@ -811,6 +811,66 @@ if (EXISTS "${_juce_x11_cpp}")
     endif()
 endif()
 
+# T3K_ANDROID_HTTP_HEADERS: fix every Android POST failing before it is sent
+# (the sign-in token exchange surfaced it as "token_exchange_failed"). JUCE
+# builds request headers with CRLF line ends and always appends its own
+# "Content-length: N\r\n" to a POST (URL::createHeadersAndPostData), but
+# JuceHTTPStream.java splits them on '\n' alone, so each value keeps a
+# trailing '\r'. HttpURLConnection rejects a control character in a header
+# value by throwing, which JuceHTTPStream reports as a failed connection. Trim
+# both halves of each header line. The .java source is the one that runs: the
+# Gradle project compiles it into the APK (android/app/build.gradle.kts), and
+# JUCE loads the app's class before its embedded bytecode copy. Idempotent
+# configure-time patch, same rationale as the patches above.
+set(_juce_http_stream_java "${LIB_DIR}/juce/modules/juce_core/native/java/app/com/rmsl/juce/JuceHTTPStream.java")
+if (EXISTS "${_juce_http_stream_java}")
+    file(READ "${_juce_http_stream_java}" _juce_http_stream_src)
+    if (NOT _juce_http_stream_src MATCHES "T3K_ANDROID_HTTP_HEADERS")
+        string(REPLACE
+            "String field = headerLines[i].substring(0, pos);"
+            "String field = headerLines[i].substring(0, pos).trim(); // T3K_ANDROID_HTTP_HEADERS"
+            _juce_http_stream_src "${_juce_http_stream_src}")
+        string(REPLACE
+            "String value = headerLines[i].substring(pos + 1);"
+            "String value = headerLines[i].substring(pos + 1).trim();"
+            _juce_http_stream_src "${_juce_http_stream_src}")
+        if (NOT _juce_http_stream_src MATCHES "T3K_ANDROID_HTTP_HEADERS" OR
+            NOT _juce_http_stream_src MATCHES "substring\\(pos \\+ 1\\)\\.trim\\(\\)")
+            message(FATAL_ERROR
+                "T3K_ANDROID_HTTP_HEADERS: failed to patch ${_juce_http_stream_java}. "
+                "The JUCE source layout likely changed in this version. Update the patch "
+                "anchors in CMakeLists.txt.")
+        endif()
+        file(WRITE "${_juce_http_stream_java}" "${_juce_http_stream_src}")
+        message(STATUS "Patched JUCE JuceHTTPStream (Android): request header lines trimmed")
+    endif()
+endif()
+
+# T3K_ANDROID_HTTP_POST: the other half of the same failure. The Android
+# backend passes addParametersToRequestBody as JuceHTTPStream's isPost flag,
+# which is only set for ParameterHandling::inPostData; raw POST data
+# (URL::withPOSTData, as the UI's HttpClient sends the token form) leaves it
+# false, so the body is never written and the server rejects an empty POST.
+# Pass hasBodyDataToSend, which covers both, as every other backend does.
+set(_juce_network_android_cpp "${LIB_DIR}/juce/modules/juce_core/native/juce_Network_android.cpp")
+if (EXISTS "${_juce_network_android_cpp}")
+    file(READ "${_juce_network_android_cpp}" _juce_network_android_src)
+    if (NOT _juce_network_android_src MATCHES "T3K_ANDROID_HTTP_POST")
+        string(REPLACE
+            "(jboolean) addParametersToRequestBody,"
+            "(jboolean) hasBodyDataToSend, // T3K_ANDROID_HTTP_POST"
+            _juce_network_android_src "${_juce_network_android_src}")
+        if (NOT _juce_network_android_src MATCHES "T3K_ANDROID_HTTP_POST")
+            message(FATAL_ERROR
+                "T3K_ANDROID_HTTP_POST: failed to patch ${_juce_network_android_cpp}. "
+                "The JUCE source layout likely changed in this version. Update the patch "
+                "anchor in CMakeLists.txt.")
+        endif()
+        file(WRITE "${_juce_network_android_cpp}" "${_juce_network_android_src}")
+        message(STATUS "Patched JUCE Network (Android): raw POST data is sent")
+    endif()
+endif()
+
 # Download GoogleTest Framework using CPM
 CPMAddPackage(
     NAME GOOGLETEST

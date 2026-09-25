@@ -73,3 +73,12 @@ android {
 // everywhere (lint included), but a Copy task isn't, and needs manual
 // dependsOn wiring on every consumer.
 android.sourceSets.getByName("main").assets.srcDirs("../../resources/factory-presets")
+
+// The JUCE Java sources above are fetched and patched by the CMake configure
+// step (see T3K_ANDROID_HTTP_HEADERS in the root CMakeLists.txt), so compile
+// them only after it has run. mustRunAfter, not dependsOn: every build already
+// schedules its own variant's configure, and any one of them patches the
+// shared libs/juce tree.
+tasks.withType<JavaCompile>().configureEach {
+    mustRunAfter(tasks.matching { it.name.startsWith("configureCMake") })
+}

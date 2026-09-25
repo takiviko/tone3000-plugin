@@ -8,7 +8,7 @@
 
 #if JUCE_ANDROID
 
-namespace EditorWebViewSetup {
+namespace HostKeys {
 
 // Android has no host DAW to hand a transport keypress back to: the
 // Standalone app IS the host, same reasoning as the iOS stub in
@@ -17,7 +17,7 @@ namespace EditorWebViewSetup {
 // rather than teaching the UI a second platform check.
 void forwardKeyToHost(void*, HostKey) {}
 
-}  // namespace EditorWebViewSetup
+}  // namespace HostKeys
 
 #elif JUCE_WINDOWS
 

@@ -447,7 +447,7 @@ juce::var TONE3000Processor::loadLocalToneUrls(const juce::Array<juce::URL>& sou
   // enumerated through juce::URL (there is no listing API behind the
   // bookmark), so "Load Folder" asks for the files themselves instead. See
   // LocalFiles::pick. Not gated on JUCE_IOS so the DSP suite can run it;
-  // the editor only reaches it on iOS.
+  // the editor only reaches it on iOS and Android.
   if (sources.isEmpty())
     return localToneError("Load Files", "Nothing to load");
 

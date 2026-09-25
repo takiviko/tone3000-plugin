@@ -484,7 +484,6 @@ if (NOT HEADLESS)
         # touch-only standalone app, same reasoning as the iOS stub in
         # WindowKeyEvents.mm. Compiled here (unlike the X11/Win32 branches
         # below) since neither needs anything from the NDK sysroot.
-        target_sources(${PROJECT_NAME} PRIVATE src/WebViewCookies.cpp)
         target_sources(${PROJECT_NAME} PRIVATE src/WindowKeyEvents.cpp)
         target_sources(${PROJECT_NAME} PRIVATE src/AudioPermissions.cpp)
     else()

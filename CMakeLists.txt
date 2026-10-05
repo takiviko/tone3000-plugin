@@ -973,6 +973,96 @@ if (EXISTS "${_juce_network_android_cpp}")
     endif()
 endif()
 
+# T3K_ANDROID_FONT_API_29: AndroidTypeface's font-fallback path (AFontMatcher,
+# ASystemFontIterator) calls NDK APIs that carry a "strict" availability
+# attribute: unlike ordinary NDK symbols, Clang refuses the call outright when
+# the compile target (ANDROID_PLATFORM, which android/app/build.gradle.kts
+# keeps equal to minSdk) is below the API level they were introduced in (29) -
+# even inside JUCE's own `__builtin_available (android 29, *)` runtime guards.
+# Confirmed by compiling this file's exact pattern against NDK 27 at
+# android-27: __builtin_available does not suppress it, because these symbols
+# (and any of JUCE's own functions tagged JUCE_INTRODUCED_IN_29/__INTRODUCED_IN)
+# are unconditionally unavailable below 29, not just weakly linked. Below API
+# 29 the calls must not be compiled at all; the "feature unavailable" fallback
+# already sitting next to each one covers that case at runtime, so every call
+# site is additionally gated by `#if __ANDROID_API__ >= 29`, which the NDK
+# toolchain sets from ANDROID_PLATFORM. Idempotent configure-time patch, same
+# rationale as the Android patches above.
+set(_juce_fonts_android_cpp "${LIB_DIR}/juce/modules/juce_graphics/native/juce_Fonts_android.cpp")
+if (EXISTS "${_juce_fonts_android_cpp}")
+    file(READ "${_juce_fonts_android_cpp}" _juce_fonts_android_src)
+    if (NOT _juce_fonts_android_src MATCHES "T3K_ANDROID_FONT_API_29")
+        # Sites 1-2 are one-line calls, so the whole guard is replaced in one
+        # go. Sites 3-4 wrap multi-line blocks; only their opening and closing
+        # lines are used as anchors so the patch doesn't duplicate their
+        # unchanged bodies.
+
+        # Site 1: createSystemFallback()
+        string(REPLACE
+[=[        if (__builtin_available (android 29, *))
+            return matchWithAFontMatcher (text, language);]=]
+[=[#if __ANDROID_API__ >= 29 // T3K_ANDROID_FONT_API_29_1
+        if (__builtin_available (android 29, *))
+            return matchWithAFontMatcher (text, language);
+#endif // T3K_ANDROID_FONT_API_29_1]=]
+            _juce_fonts_android_src "${_juce_fonts_android_src}")
+
+        # Site 2: findSystemTypeface()
+        string(REPLACE
+[=[        if (__builtin_available (android 29, *))
+            return findSystemTypefaceWithMatcher();]=]
+[=[#if __ANDROID_API__ >= 29 // T3K_ANDROID_FONT_API_29_2
+        if (__builtin_available (android 29, *))
+            return findSystemTypefaceWithMatcher();
+#endif // T3K_ANDROID_FONT_API_29_2]=]
+            _juce_fonts_android_src "${_juce_fonts_android_src}")
+
+        # Site 3: SystemFontMap::getInstance(), the ASystemFontIterator scan
+        string(REPLACE
+[=[                if (__builtin_available (android 29, *))]=]
+[=[#if __ANDROID_API__ >= 29 // T3K_ANDROID_FONT_API_29_3
+                if (__builtin_available (android 29, *))]=]
+            _juce_fonts_android_src "${_juce_fonts_android_src}")
+        string(REPLACE
+[=[                        return sfm;
+                    }
+                }]=]
+[=[                        return sfm;
+                    }
+                }
+#endif // T3K_ANDROID_FONT_API_29_3]=]
+            _juce_fonts_android_src "${_juce_fonts_android_src}")
+
+        # Site 4: Font::Native::getDefaultPlatformTypefaceForFont()
+        string(REPLACE
+[=[        if (__builtin_available (android 29, *))
+        {]=]
+[=[#if __ANDROID_API__ >= 29 // T3K_ANDROID_FONT_API_29_4
+        if (__builtin_available (android 29, *))
+        {]=]
+            _juce_fonts_android_src "${_juce_fonts_android_src}")
+        string(REPLACE
+[=[            return AndroidTypeface::fromMatchedFont (afont.get(), weight, italic);
+        }]=]
+[=[            return AndroidTypeface::fromMatchedFont (afont.get(), weight, italic);
+        }
+#endif // T3K_ANDROID_FONT_API_29_4]=]
+            _juce_fonts_android_src "${_juce_fonts_android_src}")
+
+        if (NOT _juce_fonts_android_src MATCHES "T3K_ANDROID_FONT_API_29_1" OR
+            NOT _juce_fonts_android_src MATCHES "T3K_ANDROID_FONT_API_29_2" OR
+            NOT _juce_fonts_android_src MATCHES "T3K_ANDROID_FONT_API_29_3" OR
+            NOT _juce_fonts_android_src MATCHES "T3K_ANDROID_FONT_API_29_4")
+            message(FATAL_ERROR
+                "T3K_ANDROID_FONT_API_29: failed to patch ${_juce_fonts_android_cpp}. "
+                "The JUCE source layout likely changed in this version. Update the patch "
+                "anchors in CMakeLists.txt.")
+        endif()
+        file(WRITE "${_juce_fonts_android_cpp}" "${_juce_fonts_android_src}")
+        message(STATUS "Patched JUCE Fonts (Android): API 29 font-matcher calls compile out below minSdk 29")
+    endif()
+endif()
+
 # Download GoogleTest Framework using CPM
 CPMAddPackage(
     NAME GOOGLETEST

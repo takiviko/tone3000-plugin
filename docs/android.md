@@ -9,8 +9,17 @@ stays false, so the iOS-only shell pieces (the Bluetooth sample-rate tip) do
 not appear. Desktop behaviour is unchanged. Android has no plugin host, so
 only the Standalone app is built.
 
-`minSdk` 29 (Android 10), `targetSdk` 36. ABIs `arm64-v8a` (phones and
+`minSdk` 27 (Android 8.1), `targetSdk` 36. ABIs `arm64-v8a` (phones and
 tablets) and `x86_64` (the emulator). Landscape only.
+
+Below API 29, `AndroidTypeface`'s OS font-fallback path (`AFontMatcher`,
+`ASystemFontIterator`) doesn't exist on the device anyway, so those call
+sites are compiled out by the `T3K_ANDROID_FONT_API_29` patch in the root
+`CMakeLists.txt` (`#if __ANDROID_API__ >= 29`) rather than relying on JUCE's
+own `__builtin_available` guards, which Clang rejects at compile time for
+these specific "strict"-availability NDK APIs when the target is below 29.
+Latin text is unaffected; glyph fallback outside the bundled fonts on 8.1/9
+falls back to the pre-29 behaviour already written for that case.
 
 `android/` is a hand-written Gradle project, not a Projucer export. Its
 `externalNativeBuild` points at the repo's own root `CMakeLists.txt`, so the

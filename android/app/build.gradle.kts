@@ -15,9 +15,14 @@ android {
 
     defaultConfig {
         applicationId = t3kApplicationId
-        // Must be >= 29: juce_Fonts_android.cpp fails to compile below API
-        // 29 (Clang rejects it despite JUCE's own __builtin_available guards).
-        minSdk = 29
+        // 27 (Android 8.1) is the practical floor: juce_Fonts_android.cpp's
+        // AFontMatcher/ASystemFontIterator calls carry a "strict" NDK
+        // availability attribute that Clang rejects outright below API 29,
+        // even inside JUCE's own __builtin_available guards (see the
+        // T3K_ANDROID_FONT_API_29 patch in the root CMakeLists.txt, which
+        // compiles those call sites out below 29). Below that patch, bumping
+        // this back toward 29 is the fastest unblock.
+        minSdk = 27
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -28,7 +33,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments += listOf("-DANDROID_PLATFORM=android-29")
+                arguments += listOf("-DANDROID_PLATFORM=android-27")
                 // Only the Standalone app is meaningful on Android; skip
                 // VST3/the DSP test suite/etc.
                 targets += listOf("TONE3000_Standalone")

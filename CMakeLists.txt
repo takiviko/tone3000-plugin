@@ -104,7 +104,11 @@ include(cmake/cpm.cmake)
 # 2.13.2 the ubuntu-24.04 CI image was already building against, so glyph
 # rendering is unchanged. Desktop Linux only: HEADLESS builds take the
 # find_package(JUCE) route and macOS / Windows / iOS never touch FreeType.
-if (UNIX AND NOT APPLE AND NOT HEADLESS)
+# Android also matches UNIX AND NOT APPLE but has no pkg-config in the NDK
+# toolchain (find_package(PkgConfig REQUIRED) below would hard-fail the
+# configure) and no host FreeType to collide with in the first place, so
+# it's excluded alongside the others.
+if (UNIX AND NOT APPLE AND NOT HEADLESS AND NOT T3K_ANDROID)
     CPMAddPackage(
         NAME freetype
         GITHUB_REPOSITORY freetype/freetype

@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "t3k_usb_audio_build",
+		"source" : "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb"
+	}
+}

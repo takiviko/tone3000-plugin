@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/cmake_install.cmake",
+		"/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

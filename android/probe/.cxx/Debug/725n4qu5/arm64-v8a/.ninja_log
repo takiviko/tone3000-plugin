@@ -1,0 +1,12 @@
+# ninja log v6
+1	27	1792269710805267222	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/PcmConvert.cpp.o	75a0b67aae5ee26e
+2	35	1792269710805559133	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UacControl.cpp.o	f5c61955076f193d
+1	123	1792269710805165550	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/ClockModel.cpp.o	7c0c5f7bcd502d1e
+2	271	1792269710805922643	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UsbQuirks.cpp.o	b2e75851ae324e52
+1	275	1792269710803934588	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/AudioRing.cpp.o	f8b55567f87c9385
+1	283	1792269710805467747	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/RtlMeasurement.cpp.o	ceaed67cd7f3b2b9
+2	477	1792269710805732933	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UacDescriptors.cpp.o	6e50707b3d9b2a7a
+2	623	1792269710805833709	t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UsbAudioStream.cpp.o	732fdc148ab0e65f
+623	629	1792269711425944509	t3k_usb_audio_build/libt3k_usb_audio.a	60a8d764d08c60e5
+2	920	1792269710806047142	CMakeFiles/t3k_probe.dir/probe_jni.cpp.o	31a6d488b6796cc6
+920	941	1792269711722949246	/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/build/intermediates/cxx/Debug/725n4qu5/obj/arm64-v8a/libt3k_probe.so	f4ff1ea1f595f1e7

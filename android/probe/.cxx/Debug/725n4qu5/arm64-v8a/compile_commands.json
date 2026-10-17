@@ -1,0 +1,56 @@
+[
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -Dt3k_probe_EXPORTS -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o CMakeFiles/t3k_probe.dir/probe_jni.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/src/main/cpp/probe_jni.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/src/main/cpp/probe_jni.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/CMakeFiles/t3k_probe.dir/probe_jni.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/AudioRing.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/AudioRing.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/AudioRing.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/AudioRing.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/ClockModel.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/ClockModel.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/ClockModel.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/ClockModel.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/PcmConvert.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/PcmConvert.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/PcmConvert.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/PcmConvert.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/RtlMeasurement.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/RtlMeasurement.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/RtlMeasurement.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/RtlMeasurement.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UacControl.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UacControl.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UacControl.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UacControl.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UacDescriptors.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UacDescriptors.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UacDescriptors.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UacDescriptors.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UsbAudioStream.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UsbAudioStream.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UsbAudioStream.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UsbAudioStream.cpp.o"
+},
+{
+  "directory": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a",
+  "command": "/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android27 --sysroot=/home/bdn/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -Wall -Wextra -o t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UsbQuirks.cpp.o -c /home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UsbQuirks.cpp",
+  "file": "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/UsbQuirks.cpp",
+  "output": "/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/.cxx/Debug/725n4qu5/arm64-v8a/t3k_usb_audio_build/CMakeFiles/t3k_usb_audio.dir/UsbQuirks.cpp.o"
+}
+]

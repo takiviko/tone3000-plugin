@@ -1,0 +1,24 @@
+# The probe app's native half (plan section 6.6): a tiny standalone CMake
+# project that pulls in plugin/usb as a static lib and nothing else. Keep it
+# out of the main target graph; Gradle configures it per-module with the NDK
+# toolchain.
+
+cmake_minimum_required(VERSION 3.22)
+project(t3k_probe LANGUAGES CXX)
+
+# The driver core: identical code to what the host UsbTests suite exercises.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../../plugin/usb t3k_usb_audio_build)
+
+add_library(t3k_probe SHARED
+    probe_jni.cpp
+)
+
+target_compile_features(t3k_probe PRIVATE cxx_std_17)
+if (NOT MSVC)
+    target_compile_options(t3k_probe PRIVATE -Wall -Wextra)
+endif()
+
+target_link_libraries(t3k_probe PRIVATE
+    t3k_usb_audio
+    log   # __android_log_print
+)

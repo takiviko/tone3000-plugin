@@ -83,8 +83,8 @@ def find_burst(rec: np.ndarray, probe: np.ndarray) -> tuple[int, float]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--list-devices", action="store_true")
-    ap.add_argument("--out-device", type=int, default=None, help="output device index")
-    ap.add_argument("--in-device", type=int, default=None, help="input device index")
+    ap.add_argument("--out-device", default=None, help="output device index or name")
+    ap.add_argument("--in-device", default=None, help="input device index or name")
     ap.add_argument("--rate", type=int, default=48000)
     ap.add_argument("--trials", type=int, default=20)
     ap.add_argument("--probe", choices=("sweep", "mls"), default="sweep")
@@ -94,8 +94,17 @@ def main() -> int:
     ap.add_argument("--ref-channel", type=int, default=0, help="rec ch with the loopback reference")
     ap.add_argument("--path-channel", type=int, default=1, help="rec ch with the tablet path")
     ap.add_argument("--in-channels", type=int, default=2, help="input channels to record")
+    ap.add_argument("--out-channels", default="all",
+                    help="comma-separated output channel indices to play the burst on "
+                         "(default: all; e.g. '2,3' keeps monitors on 0,1 silent)")
     ap.add_argument("--csv", help="append per-trial rows to this file")
     args = ap.parse_args()
+
+    # Accept numeric strings as indices, everything else as a device name.
+    for attr in ("out_device", "in_device"):
+        v = getattr(args, attr)
+        if v is not None and str(v).isdigit():
+            setattr(args, attr, int(v))
 
     if args.list_devices:
         print(sd.query_devices())
@@ -114,10 +123,14 @@ def main() -> int:
               f"(path channel {args.path_channel})", file=sys.stderr)
         return 1
 
-    # Playback the burst on every output channel (either the loopback cable or
-    # the interface input picks it up).
+    # Playback the burst on the selected output channels (either the loopback
+    # cable or the interface input picks it up); everything else stays silent.
     out = np.zeros((burst_pad.size, max(2, out_ch)), dtype=np.float32)
-    out[:] = burst_pad[:, None]
+    if args.out_channels == "all":
+        out[:] = burst_pad[:, None]
+    else:
+        for ch in args.out_channels.split(","):
+            out[:, int(ch)] = burst_pad
 
     results = []
     for trial in range(args.trials):

@@ -26,21 +26,21 @@ public final class NativeBridge {
 
     /** Open the stream (rate/clock control + SET_INTERFACE + URB machine) on
         a background USB thread. Returns an empty string on success. */
-    public static native String nativeStart(int fd, int vid, int pid, int rate,
-                                            int channels, int subslot, int packetsPerUrb,
-                                            int urbsInFlight);
+    public static native String nativeStart(int fd, byte[] rawDescriptors, int vid,
+                                            int pid, int rate, int channels, int subslot,
+                                            int packetsPerUrb, int urbsInFlight);
 
     /** Stop the stream cleanly (DISCARDURB, SET_INTERFACE 0). */
     public static native String nativeStop();
 
     /** Self-measure round-trip latency (plan section 4.1) and return the CSV
         rows (one per trial) plus a summary line. */
-    public static native String nativeRtl(int fd, int vid, int pid, int rate,
-                                          int channels, int subslot, int packetsPerUrb,
-                                          int urbsInFlight, int trials);
+    public static native String nativeRtl(int fd, byte[] rawDescriptors, int vid, int pid,
+                                          int rate, int channels, int subslot,
+                                          int packetsPerUrb, int urbsInFlight, int trials);
 
     /** Sweep rtl across the frames/URB x URBs-in-flight matrix (plan M1.6)
         and return one CSV row per configuration. */
-    public static native String nativeSweep(int fd, int vid, int pid, int rate,
-                                            int channels, int subslot);
+    public static native String nativeSweep(int fd, byte[] rawDescriptors, int vid, int pid,
+                                            int rate, int channels, int subslot);
 }

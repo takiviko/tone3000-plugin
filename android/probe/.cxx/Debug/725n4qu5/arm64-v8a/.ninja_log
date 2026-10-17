@@ -10,3 +10,5 @@
 623	629	1792269711425944509	t3k_usb_audio_build/libt3k_usb_audio.a	60a8d764d08c60e5
 2	920	1792269710806047142	CMakeFiles/t3k_probe.dir/probe_jni.cpp.o	31a6d488b6796cc6
 920	941	1792269711722949246	/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/build/intermediates/cxx/Debug/725n4qu5/obj/arm64-v8a/libt3k_probe.so	f4ff1ea1f595f1e7
+4	926	1792269888407714990	CMakeFiles/t3k_probe.dir/probe_jni.cpp.o	31a6d488b6796cc6
+926	948	1792269889329729180	/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/build/intermediates/cxx/Debug/725n4qu5/obj/arm64-v8a/libt3k_probe.so	f4ff1ea1f595f1e7

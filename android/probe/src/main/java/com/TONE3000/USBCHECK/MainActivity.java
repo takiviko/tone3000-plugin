@@ -136,7 +136,7 @@ public final class MainActivity extends Activity implements UsbShell.Listener {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
         String err = NativeBridge.nativeStart(
-                activeFd, device.getVendorId(), device.getProductId(),
+                activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
                 48000, 2, 3, 8, 3);
         log("stream: " + (err.isEmpty() ? "running (48 kHz/2ch/subslot 3, 3x8)" : err));
         streaming = err.isEmpty();
@@ -146,7 +146,7 @@ public final class MainActivity extends Activity implements UsbShell.Listener {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
         String rows = NativeBridge.nativeRtl(
-                activeFd, device.getVendorId(), device.getProductId(),
+                activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
                 48000, 2, 3, 8, 3, 5);
         appendCsv(rows);
         for (String line : rows.split("\n")) log(line);
@@ -156,7 +156,8 @@ public final class MainActivity extends Activity implements UsbShell.Listener {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
         String rows = NativeBridge.nativeSweep(
-                activeFd, device.getVendorId(), device.getProductId(), 48000, 2, 3);
+                activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
+                48000, 2, 3);
         appendCsv(rows);
         for (String line : rows.split("\n")) log(line);
     }

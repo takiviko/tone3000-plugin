@@ -266,6 +266,15 @@ struct ProbeCallback : t3k::usb::UsbAudioStream::Callback {
 
 ProbeCallback g_callback;
 
+// Extract the descriptor bytes from a Java array (empty = caller has none).
+std::vector<uint8_t> bytesFrom(JNIEnv* env, jbyteArray raw) {
+  if (raw == nullptr) return {};
+  jsize len = env->GetArrayLength(raw);
+  std::vector<uint8_t> out(static_cast<size_t>(len));
+  env->GetByteArrayRegion(raw, 0, len, reinterpret_cast<jbyte*>(out.data()));
+  return out;
+}
+
 StreamConfig configFrom(int rate, int channels, int subslot, const uint8_t* raw,
                         size_t rawLen, int vid, int pid) {
   StreamConfig cfg;
@@ -432,14 +441,13 @@ Java_com_TONE3000_USBCHECK_NativeBridge_nativeDump(JNIEnv* env, jclass,
 
 JNIEXPORT jstring JNICALL
 Java_com_TONE3000_USBCHECK_NativeBridge_nativeStart(JNIEnv* env, jclass, jint fd,
-                                                    jint vid, jint pid, jint rate,
-                                                    jint channels, jint subslot,
-                                                    jint packetsPerUrb, jint urbsInFlight) {
-  // The raw descriptors arrive via the session's configFrom() in a fuller
-  // build; the probe keeps the descriptor parse on the dump path and starts
-  // from the standard AMS-22 layout here (endpoints are re-derived when the
-  // dump has run).
-  StreamConfig cfg = configFrom(rate, channels, subslot, nullptr, 0, vid, pid);
+                                                    jbyteArray rawDescriptors, jint vid,
+                                                    jint pid, jint rate, jint channels,
+                                                    jint subslot, jint packetsPerUrb,
+                                                    jint urbsInFlight) {
+  const std::vector<uint8_t> raw = bytesFrom(env, rawDescriptors);
+  StreamConfig cfg =
+      configFrom(rate, channels, subslot, raw.data(), raw.size(), vid, pid);
   g_callback.mode = 0;
   g_callback.rate = rate;
   std::string err = openStream(fd, cfg, packetsPerUrb, urbsInFlight);
@@ -453,11 +461,14 @@ Java_com_TONE3000_USBCHECK_NativeBridge_nativeStop(JNIEnv* env, jclass) {
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_TONE3000_USBCHECK_NativeBridge_nativeRtl(JNIEnv* env, jclass, jint fd, jint vid,
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeRtl(JNIEnv* env, jclass, jint fd,
+                                                   jbyteArray rawDescriptors, jint vid,
                                                    jint pid, jint rate, jint channels,
                                                    jint subslot, jint packetsPerUrb,
                                                    jint urbsInFlight, jint trials) {
-  StreamConfig cfg = configFrom(rate, channels, subslot, nullptr, 0, vid, pid);
+  const std::vector<uint8_t> raw = bytesFrom(env, rawDescriptors);
+  StreamConfig cfg =
+      configFrom(rate, channels, subslot, raw.data(), raw.size(), vid, pid);
   g_callback.mode = 1;
   g_callback.rate = rate;
   g_callback.burst = t3k::usb::rtl::makeSweep(rate, 2.0, -12.0f);
@@ -507,13 +518,16 @@ Java_com_TONE3000_USBCHECK_NativeBridge_nativeRtl(JNIEnv* env, jclass, jint fd, 
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_TONE3000_USBCHECK_NativeBridge_nativeSweep(JNIEnv* env, jclass, jint fd, jint vid,
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeSweep(JNIEnv* env, jclass, jint fd,
+                                                     jbyteArray rawDescriptors, jint vid,
                                                      jint pid, jint rate, jint channels,
                                                      jint subslot) {
+  const std::vector<uint8_t> raw = bytesFrom(env, rawDescriptors);
   std::string rows = "sweep: packetsPerUrb,urbsInFlight,rtlMs,peakRatio,xruns,driftPpm\n";
   for (int packets : {1, 2, 4, 8}) {
     for (int urbs : {2, 3, 4}) {
-      StreamConfig cfg = configFrom(rate, channels, subslot, nullptr, 0, vid, pid);
+      StreamConfig cfg =
+          configFrom(rate, channels, subslot, raw.data(), raw.size(), vid, pid);
       g_callback.mode = 1;
       g_callback.rate = rate;
       g_callback.burst = t3k::usb::rtl::makeSweep(rate, 2.0, -12.0f);

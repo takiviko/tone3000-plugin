@@ -5,6 +5,26 @@ with a userspace USB audio driver, and take end-to-end monitoring latency
 from the current Oboe path to the 4-10 ms band on the Samsung Galaxy Tab
 S10 FE + Zoom AMS-22 rig. Plan: `~/.opencode/plan/t3k-usb-low-latency.md`.
 
+## Probe app (M1)
+
+`android/probe` (package `com.TONE3000.USBCHECK`) is the spike vehicle:
+enumerate, `dump` (descriptor tree + fixtures), `stream` (sustained duplex
+with xrun/URB stats), `rtl` (self-measurement, section 4.1), `sweep` (rtl
+across the URB layout matrix, plan M1.6). Driven entirely over adb:
+
+```sh
+./script/android-dev.sh probe build
+./script/android-dev.sh probe install
+adb shell am start -n com.TONE3000.USBCHECK/.MainActivity -e mode dump
+adb logcat -s T3KUSB                    # structured one-line records
+./script/android-dev.sh probe csv       # files/rtl.csv measurement rows
+```
+
+The USB permission dialog needs an unlocked screen; the first launch of each
+session asks it once. Claiming the AudioStreaming interfaces detaches the
+kernel's `snd-usb-audio`, which is expected and required; the log records
+what each interface's kernel driver was beforehand.
+
 ## Measurement method
 
 Two complementary rigs (plan section 4):

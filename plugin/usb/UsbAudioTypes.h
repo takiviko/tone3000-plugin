@@ -34,15 +34,19 @@ struct StreamConfig {
   uint8_t subslotBytes = 3;
   /** bBitResolution from the Type I format descriptor (e.g. 24). */
   uint8_t bitResolution = 24;
-  /** Data endpoint address including the direction bit (0x01 OUT, 0x81 IN). */
-  uint8_t dataEndpoint = 0x81;
+  /** Data endpoint addresses including the direction bit (0 = absent, so a
+      capture-only or playback-only device is expressible). */
+  uint8_t playbackEndpoint = 0x02;
+  uint8_t captureEndpoint = 0x81;
   /** Explicit feedback endpoint address, or 0 for implicit feedback. */
   uint8_t feedbackEndpoint = 0;
-  /** Altsetting index that carries the data endpoint (0 = zero bandwidth). */
-  uint8_t altsetting = 1;
-  /** Interface numbers, for class-specific control requests. */
-  uint8_t dataInterface = 2;
-  uint8_t controlInterface = 0;
+  /** Active altsetting indices (0 = zero bandwidth) and their interfaces.
+      The AMS-22 has one AudioStreaming interface per direction, each with
+      its own altsetting and terminal link. */
+  uint8_t playbackAltsetting = 1;
+  uint8_t captureAltsetting = 1;
+  uint8_t playbackInterface = 1;
+  uint8_t captureInterface = 2;
   /** UAC2 clock source entity id (wIndex high byte of the rate control).
       Unused for UAC1, which addresses the endpoint instead. */
   uint8_t clockSourceId = 1;

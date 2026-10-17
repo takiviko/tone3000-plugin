@@ -12,6 +12,8 @@ add_library(t3k_usb_audio STATIC
     RtlMeasurement.cpp
     UacControl.cpp
     UacDescriptors.cpp
+    UsbAudioStream.cpp
+    UsbQuirks.cpp
 )
 
 target_include_directories(t3k_usb_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -11,6 +11,8 @@ add_executable(UsbTests
     rtl_tests.cpp
     uac_control_tests.cpp
     uac_descriptors_tests.cpp
+    usbaudiostream_tests.cpp
+    usb_quirks_tests.cpp
 )
 
 target_link_libraries(UsbTests PRIVATE t3k_usb_audio GTest::gtest GTest::gtest_main)

@@ -35,14 +35,27 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 APP_PKG=com.TONE3000.TONE3000
 APP_ACTIVITY=.MainActivity
 APP_TASK=app
-APP_APK=android/app/build/outputs/apk/debug/app-debug.apk
+APP_APK=app
 APP_LOG_PATH=TONE3000/TONE3000.log
 
 PROBE_PKG=com.TONE3000.USBCHECK
 PROBE_ACTIVITY=.MainActivity
 PROBE_TASK=probe
-PROBE_APK=android/probe/build/outputs/apk/debug/probe-debug.apk
+PROBE_APK=probe
 PROBE_LOG_PATH=files/rtl.csv
+
+# The debug APK lands in either outputs/apk/debug or (this AGP) the
+# intermediates tree, with a redirect file in outputs. Check both.
+find_apk() {
+  local name=$1 d
+  for d in "android/$1/build/outputs/apk/debug" "android/$1/build/intermediates/apk/debug"; do
+    if [ -f "$d/$name-debug.apk" ]; then
+      echo "$d/$name-debug.apk"
+      return 0
+    fi
+  done
+  return 1
+}
 
 TARGET=app
 case "${1:-}" in
@@ -53,9 +66,9 @@ MODE=${1:-}
 shift || true
 
 if [ "$TARGET" = app ]; then
-  PKG=$APP_PKG ACTIVITY=$APP_ACTIVITY TASK=$APP_TASK APK=$APP_APK
+  PKG=$APP_PKG ACTIVITY=$APP_ACTIVITY TASK=$APP_TASK MODULE=$APP_APK
 else
-  PKG=$PROBE_PKG ACTIVITY=$PROBE_ACTIVITY TASK=$PROBE_TASK APK=$PROBE_APK
+  PKG=$PROBE_PKG ACTIVITY=$PROBE_ACTIVITY TASK=$PROBE_TASK MODULE=$PROBE_APK
 fi
 
 case "$MODE" in
@@ -75,10 +88,12 @@ case "$MODE" in
       ABI_ARGS+=(-Pandroid.injected.build.abi=arm64-v8a)
     fi
     (cd android && ./gradlew ":$TASK:assembleDebug" "${ABI_ARGS[@]}")
-    echo "APK: $APK"
+    echo "APK: $(find_apk "$MODULE" || echo 'NOT FOUND')"
     ;;
   install)
-    adb install -r "$APK"
+    APK=$(find_apk "$MODULE") || { echo "no $MODULE debug APK built yet" >&2; exit 1; }
+    # -t: debug builds carry testOnly; the flag allows them.
+    adb install -r -t "$APK"
     ;;
   run)
     adb shell am start -n "$PKG/$ACTIVITY"

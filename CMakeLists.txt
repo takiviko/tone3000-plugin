@@ -1108,11 +1108,15 @@ CPMAddPackage(
 enable_testing() # Allow running build tests
 
 add_subdirectory(plugin) # Add plugin project
+# USB audio driver core (plan D1): pure C++, no JUCE. Builds for every
+# platform; the Android shell links it at M3, the host runs its tests below.
+add_subdirectory(plugin/usb)
 # The DSP suite is a host-run console binary (it reads test assets off the
 # build machine's disk and is driven by script/test-dsp.sh). Cross-compiling it
 # for iOS or Android produces something that cannot be run, so keep it out of
-# those builds.
+# those builds. Same for the USB core's unit tests.
 if (NOT T3K_IOS AND NOT T3K_ANDROID)
+    add_subdirectory(plugin/usb/test)  # USB core suite (UsbTests)
     add_subdirectory(test)   # DSP test suite (DspTests, see script/test-dsp.sh)
     add_subdirectory(tools)  # maintainer utilities (PresetTool), EXCLUDE_FROM_ALL
 endif()

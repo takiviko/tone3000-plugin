@@ -50,6 +50,8 @@ struct StreamConfig {
   /** UAC2 clock source entity id (wIndex high byte of the rate control).
       Unused for UAC1, which addresses the endpoint instead. */
   uint8_t clockSourceId = 1;
+  /** AudioControl interface number (wIndex low byte of class requests). */
+  uint8_t controlInterface = 0;
 
   int bytesPerFrame() const { return channels * subslotBytes; }
   /** Frames per packet at the nominal rate and cadence. */

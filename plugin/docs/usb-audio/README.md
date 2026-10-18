@@ -18,7 +18,15 @@ across the URB layout matrix, plan M1.6). Driven entirely over adb:
 adb shell am start -n com.TONE3000.USBCHECK/.MainActivity -e mode dump
 adb logcat -s T3KUSB                    # structured one-line records
 ./script/android-dev.sh probe csv       # files/rtl.csv measurement rows
+./script/usb-scenarios.sh doctor        # adb, USB topology, battery, power
+./script/usb-scenarios.sh start         # shipping layout 8x4 + 128 ring
+./script/usb-scenarios.sh status        # one-line counters
+./script/usb-scenarios.sh soak 60 --screen-off
 ```
+
+The probe session lives in `ProbeService` (foreground, partial wake lock), so
+the stream survives the screen turning off. Commands are service intents;
+the activity only owns the USB permission prompt.
 
 The USB permission dialog needs an unlocked screen; the first launch of each
 session asks it once. Claiming the AudioStreaming interfaces detaches the
@@ -111,6 +119,11 @@ Raw evidence: `results-baseline-oboe-bypass.{txt,csv}`,
 | `results-baseline-oboe-model.txt` | M0 baseline with a NAM model loaded |
 | `results-m1-stream.txt` | M1.5 soak: 14.5 min, zero xruns, detach/replug |
 | `results-m1-rtl.txt` | M1.6 rtl medians + URB layout sweep |
+| `results-m2-feedback.txt` | M2.1 feedback pacing smoke test |
+| `results-m2-ring.txt` | M2.2 ring policy + stress |
+| `results-m2-layout.txt` | M2.3/M2.4 cadence, ring, RTL, recovery |
+| `results-m2-soak.txt` | M2.4 60-minute screen-off soak |
+| `m2-report.md` | M2 driver-core report |
 | `results-baseline-oboe-dumpsys.txt` | audio_flinger / audio_policy / logcat during streaming |
 | `ams22-descriptors.md` | AMS-22 descriptor dump and entity graph (M1.3) |
 | `m1-report.md` | M1 probe spike go/no-go (M1.7) |
@@ -120,4 +133,4 @@ Raw evidence: `results-baseline-oboe-bypass.{txt,csv}`,
 
 | Device | USB class | Status |
 | --- | --- | --- |
-| Zoom AMS-22 | UAC2, explicit feedback | baseline measured; driver work in progress |
+| Zoom AMS-22 | UAC2, explicit feedback | driver core complete (M2): 8x4/128, 5.52 ms digital RTL; USB Direct integration in progress (M3) |

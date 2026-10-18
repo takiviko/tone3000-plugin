@@ -165,9 +165,9 @@ def main() -> int:
             lo_lag = max(0, min(lo_lag, len(path) - len(probe)))
             hi_lag = max(lo_lag, min(hi_lag, len(path) - len(probe)))
             seg = path[lo_lag:hi_lag + len(probe)]
-            found = find_burst(seg, probe)
-            lag_path = found.lag + lo_lag
-            ratio_path = found.peakRatio
+            seg_lag, seg_ratio = find_burst(seg, probe)
+            lag_path = seg_lag + lo_lag
+            ratio_path = seg_ratio
         rtl_ms = (lag_path - lag_ref) / args.rate * 1000.0
         results.append((rtl_ms, min(ratio_ref, ratio_path)))
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")

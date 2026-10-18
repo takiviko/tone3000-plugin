@@ -68,14 +68,20 @@ kernel 6.6.102-android15) + Zoom AMS-22 (input gain 5/10, output 10/10),
 TONE3000 debug build, chain bypassed (no NAM model), monitoring live:
 
 ```
-e2e (bypass)      = 88.2 ms   [PC rig, median of 20, spread 0.02 ms]
-e2e (model)       = (pending, see results-baseline-oboe-model.txt)
-converters (est)  =  1-2 ms   [AMS-22 ADC+DAC, typical class-compliant]
-app buffer        = 40.0 ms   [samplesPerBlock=1920 at 48 kHz, from app log]
-android in        = ~20 ms    [MMAP capture ring 3072 frames = 64 ms;
+e2e (bypass)      =  88.2 ms  [PC rig, median of 20, spread 0.02 ms]
+e2e (model)       = 74-137 ms [PC rig, 20 trials, median 81.6; UNSTABLE]
+converters        =   ~1.0 ms [measured: the AMS-22's raw feed peak]
+app buffer        =  40.0 ms  [samplesPerBlock=1920 at 48 kHz, from app log]
+android in        =  ~20 ms   [MMAP capture ring 3072 frames = 64 ms;
                                JUCE polls input from the output callback]
-android out       = ~25 ms    [MMAP playback ring 3072 frames = 64 ms]
+android out       =  ~25 ms   [MMAP playback ring 3072 frames = 64 ms]
 ```
+
+With the NAM chain active the pipeline latency jitters from trial to trial
+(73-137 ms across runs; the bypass path is stable to 0.02 ms). The jitter is
+audible as occasional digital artifacts and is a property of the Oboe
+two-stream design under DSP load, exactly what the USB-direct driver's fixed
+URB cadence replaces.
 
 Attribution notes (from `results-baseline-oboe-dumpsys.txt`):
 

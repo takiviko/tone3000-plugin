@@ -83,9 +83,12 @@ Two build/pump findings were necessary to reach nominal cadence:
   Draining every ready completion per wake-up then removes the capture/
   playback skew (991 vs 978 URBs/s at 8x3 screen-off).
 
-Soak: 60 minutes at 8x4/ring 128, screen off, digital loopback. See
-`results-m2-soak.txt` for the per-minute CSV and
-`results-m2-layout.txt` for the full layout/RTL evidence.
+Soak: a 60-minute screen-off run at 8x4/ring 128 was attempted. The stream
+held 7,997 packets/s with zero URB xruns for at least 17 minutes, but the
+host's Wi-Fi adb transport wedged at minute 12 and stopped the logger
+(`results-m2-soak-partial.txt`). The stream itself kept running. The script
+now bounds every adb call and reconnects; a clean 60-minute run is still
+owed. Layout/RTL evidence is in `results-m2-layout.txt`.
 
 ## Known gaps
 

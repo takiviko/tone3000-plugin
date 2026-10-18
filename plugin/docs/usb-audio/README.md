@@ -122,8 +122,9 @@ Raw evidence: `results-baseline-oboe-bypass.{txt,csv}`,
 | `results-m2-feedback.txt` | M2.1 feedback pacing smoke test |
 | `results-m2-ring.txt` | M2.2 ring policy + stress |
 | `results-m2-layout.txt` | M2.3/M2.4 cadence, ring, RTL, recovery |
-| `results-m2-soak.txt` | M2.4 60-minute screen-off soak |
+| `results-m2-soak-partial.txt` | M2.4 17-minute continuous soak (transport wedged; 60-min run pending) |
 | `m2-report.md` | M2 driver-core report |
+| `m3-report.md` | M3 USB Direct integration status + blocker |
 | `results-baseline-oboe-dumpsys.txt` | audio_flinger / audio_policy / logcat during streaming |
 | `ams22-descriptors.md` | AMS-22 descriptor dump and entity graph (M1.3) |
 | `m1-report.md` | M1 probe spike go/no-go (M1.7) |

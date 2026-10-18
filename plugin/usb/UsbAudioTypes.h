@@ -88,6 +88,11 @@ struct StreamStats {
   uint64_t feedbackPackets = 0;
   uint64_t feedbackErrors = 0;
   double feedbackValue = 0.0;
+  /** Ring policy counters (plan M2.2): output underruns where the last frame
+      was repeated, and input overruns where the oldest frames were dropped.
+      Cumulative for the stream. */
+  uint64_t ringUnderruns = 0;
+  uint64_t ringOverruns = 0;
 };
 
 }  // namespace t3k::usb

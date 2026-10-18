@@ -121,8 +121,8 @@ TEST(AudioRing, PartialDropOldestSkipsOnlyTheLappedFrames) {
 }
 
 TEST(AudioRing, ProducerConsumerStressIsConsistent) {
-  // Cheap cross-thread smoke (the plan's 10^8-op stress lands in M2): each
-  // frame carries its own index, so any lost or duplicated frame shows up.
+  // Cheap cross-thread smoke; the full 10^8-frame run is below. Each frame
+  // carries its own index, so any lost or duplicated frame shows up.
   AudioRing ring(256, kBpf);
   constexpr uint64_t kFrames = 200000;
   std::thread producer([&] {
@@ -144,6 +144,57 @@ TEST(AudioRing, ProducerConsumerStressIsConsistent) {
   producer.join();
   consumer.join();
   EXPECT_EQ(expected, kFrames);
+  EXPECT_EQ(ring.underruns(), 0u);
+  EXPECT_EQ(ring.overruns(), 0u);
+}
+
+TEST(AudioRing, TenToTheEighthFramesStress) {
+  // Plan M2.2's long stress: 10^8 frames through a lock-free SPSC ring with
+  // a real producer and consumer thread. Every frame is checked, so a lost,
+  // duplicated or torn frame fails the test.
+  constexpr uint64_t kTotal = 100000000ull;
+  constexpr size_t kBlock = 256;
+  AudioRing ring(1024, kBpf);
+  std::atomic<bool> failed{false};
+  uint64_t consumed = 0;
+
+  std::thread producer([&] {
+    std::vector<uint8_t> block(kBlock * kBpf);
+    uint64_t sent = 0;
+    while (sent < kTotal) {
+      const size_t n = static_cast<size_t>(std::min<uint64_t>(kBlock, kTotal - sent));
+      for (size_t i = 0; i < n; ++i) {
+        const uint32_t v = static_cast<uint32_t>(sent + i);
+        block[i * 4 + 0] = static_cast<uint8_t>(v);
+        block[i * 4 + 1] = static_cast<uint8_t>(v >> 8);
+        block[i * 4 + 2] = static_cast<uint8_t>(v >> 16);
+        block[i * 4 + 3] = static_cast<uint8_t>(v >> 24);
+      }
+      sent += ring.write(block.data(), n);
+    }
+  });
+
+  std::thread consumer([&] {
+    std::vector<uint8_t> out(kBlock * kBpf);
+    while (consumed < kTotal) {
+      const size_t want = static_cast<size_t>(std::min<uint64_t>(kBlock, kTotal - consumed));
+      const size_t n = ring.read(out.data(), want);
+      if (!failed.load(std::memory_order_relaxed)) {
+        for (size_t i = 0; i < n; ++i) {
+          if (frameValue(&out[i * 4]) != static_cast<uint32_t>(consumed + i)) {
+            failed.store(true, std::memory_order_relaxed);
+            break;
+          }
+        }
+      }
+      consumed += n;
+    }
+  });
+
+  producer.join();
+  consumer.join();
+  EXPECT_FALSE(failed.load());
+  EXPECT_EQ(consumed, kTotal);
   EXPECT_EQ(ring.underruns(), 0u);
   EXPECT_EQ(ring.overruns(), 0u);
 }

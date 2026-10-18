@@ -238,6 +238,92 @@ TEST(UsbAudioStream, DuplexCallbackSeesCapturedAudio) {
   }
 }
 
+TEST(UsbAudioStream, PlaybackPacingCanUseOneExtraFrame) {
+  // A high ring drives the pacer to +1 frame; the callback buffers must hold
+  // it (the pre-M2.2 scratch allocation overflowed here).
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  for (int i = 0; i < 8; ++i) {
+    Urb* cap = firstOf(transport, /*capture=*/true);
+    ASSERT_NE(cap, nullptr);
+    FakeTransport::fillFull(cap);  // 8 packets x 6 frames = 48
+    transport.complete(cap, i * 8);
+    ASSERT_TRUE(stream.pumpOnce(0));
+  }
+  EXPECT_EQ(stream.captureStats().ringOverruns, 0u);
+
+  Urb* play = firstOf(transport, /*capture=*/false);
+  ASSERT_NE(play, nullptr);
+  FakeTransport::fillFull(play);
+  transport.complete(play, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+
+  EXPECT_EQ(cb.frames, 49);
+  int frames = 0;
+  for (uint32_t len : play->packetLengths) frames += static_cast<int>(len / kBpf);
+  EXPECT_EQ(frames, 49);
+  // Every packet still holds whole frames.
+  for (uint32_t len : play->packetLengths) EXPECT_EQ(len % kBpf, 0u);
+}
+
+TEST(UsbAudioStream, PlaybackUnderrunRepeatsAndCounts) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+  const uint64_t startUnderruns = stream.playbackStats().ringUnderruns;
+  ASSERT_GE(startUnderruns, 3u);  // priming before any capture arrived
+
+  Urb* play = firstOf(transport, /*capture=*/false);
+  ASSERT_NE(play, nullptr);
+  FakeTransport::fillFull(play);
+  transport.complete(play, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_EQ(stream.playbackStats().ringUnderruns, startUnderruns + 1);
+  // readOrRepeat always hands the callback a full buffer.
+  EXPECT_GE(cb.frames, 47);
+  EXPECT_LE(cb.frames, 49);
+}
+
+
+TEST(UsbAudioStream, RingPolicyCountersAreSurfaced) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+  // The three playback URBs primed before any capture count as underruns.
+  const uint64_t startUnderruns = stream.playbackStats().ringUnderruns;
+
+  // Overfill the ring: 12 x 48 frames into a 512-frame ring.
+  for (int i = 0; i < 12; ++i) {
+    Urb* cap = firstOf(transport, /*capture=*/true);
+    ASSERT_NE(cap, nullptr);
+    FakeTransport::fillFull(cap);
+    transport.complete(cap, i * 8);
+    ASSERT_TRUE(stream.pumpOnce(0));
+  }
+  // A playback reap reads across the lap, counting the overrun. The ring had
+  // data, so no output underrun is added.
+  Urb* play = firstOf(transport, /*capture=*/false);
+  ASSERT_NE(play, nullptr);
+  FakeTransport::fillFull(play);
+  transport.complete(play, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_EQ(stream.playbackStats().ringUnderruns, startUnderruns);
+
+  // The overrun is visible on the capture stats after the next capture reap.
+  Urb* cap = firstOf(transport, /*capture=*/true);
+  ASSERT_NE(cap, nullptr);
+  FakeTransport::fillFull(cap);
+  transport.complete(cap, 12 * 8);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_EQ(stream.captureStats().ringOverruns, 1u);
+}
+
+
 TEST(UsbAudioStream, ShortCapturePacketCountsXrun) {
   FakeTransport transport;
   RecordingCallback cb;

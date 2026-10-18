@@ -30,8 +30,10 @@ UsbAudioStream::UsbAudioStream(const StreamConfig& config, const Options& option
       bytesPerFrame_(config.bytesPerFrame()),
       targetFill_(std::max<size_t>(options.ringFrames / 2, 1)),
       captureRing_(options.ringFrames, config.bytesPerFrame()),
-      inScratch_(static_cast<size_t>(callbackFrames()) * config.channels, 0.0f),
-      outScratch_(static_cast<size_t>(callbackFrames()) * config.channels, 0.0f) {}
+      // Pacing may add a frame to the nominal URB (plan section 6.4), so the
+      // callback buffers must hold one more frame than callbackFrames().
+      inScratch_(static_cast<size_t>(callbackFrames() + 2) * config.channels, 0.0f),
+      outScratch_(static_cast<size_t>(callbackFrames() + 2) * config.channels, 0.0f) {}
 
 int UsbAudioStream::callbackFrames() const {
   return options_.packetsPerUrb * framesPerPacket_;
@@ -98,15 +100,14 @@ void UsbAudioStream::preparePlaybackUrb(Urb& urb) {
   // Run the DSP directly into the URB: capture ring in, wire bytes out. The
   // only intermediate copy in the whole path is the capture ring (D3).
   const int frames = static_cast<int>(bytes / static_cast<size_t>(bytesPerFrame_));
-  std::fill(inScratch_.begin(), inScratch_.end(), 0.0f);
-  std::fill(outScratch_.begin(), outScratch_.end(), 0.0f);
   wireScratch_.resize(static_cast<size_t>(frames) * bytesPerFrame_);
-  const size_t gotFrames = captureRing_.read(wireScratch_.data(),
-                                             static_cast<size_t>(frames));
-  if (gotFrames > 0) {
-    pcm::wireToFloat(wireScratch_.data(), inScratch_.data(), gotFrames, config_.channels,
-                     config_.subslotBytes);
-  }
+  // Output policy (plan M2.2): a short capture repeats the last frame rather
+  // than handing the DSP a hole, and the underrun is counted.
+  captureRing_.readOrRepeat(wireScratch_.data(), static_cast<size_t>(frames));
+  playbackStats_.ringUnderruns = captureRing_.underruns();
+  pcm::wireToFloat(wireScratch_.data(), inScratch_.data(), static_cast<size_t>(frames),
+                   config_.channels, config_.subslotBytes);
+  std::fill(outScratch_.begin(), outScratch_.end(), 0.0f);
   callback_.process(inScratch_.data(), outScratch_.data(), frames, config_.channels);
   pcm::floatToWire(outScratch_.data(), urb.buffer.data(), static_cast<size_t>(frames),
                    config_.channels, config_.subslotBytes);
@@ -148,6 +149,9 @@ void UsbAudioStream::handleCapture(Urb& urb) {
     }
     offset += urb.packetLengths[p];
   }
+  // Input policy (plan M2.2): writeDropOldest always accepts; frames the
+  // consumer never saw are counted as overruns.
+  captureStats_.ringOverruns = captureRing_.overruns();
 
   // Drift: explicit feedback wins when present; otherwise observed capture
   // progress (plan section 6.4). Feedback stops arriving if the endpoint

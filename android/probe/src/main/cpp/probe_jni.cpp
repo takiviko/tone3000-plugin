@@ -374,11 +374,13 @@ std::string openStream(int fd, const StreamConfig& cfg, int packetsPerUrb,
         const auto& cap = g_session.stream->captureStats();
         const auto& play = g_session.stream->playbackStats();
         PROBE_LOG("stream: capUrb=%llu capPkts=%llu playUrb=%llu playPkts=%llu xruns=%llu "
-                  "bytes=%llu drift=%.1f",
+                  "bytes=%llu drift=%.1f ringOver=%llu ringUnder=%llu",
                   (unsigned long long)cap.urbsReaped, (unsigned long long)cap.packets,
                   (unsigned long long)play.urbsReaped, (unsigned long long)play.packets,
                   (unsigned long long)(cap.xruns + play.xruns),
-                  (unsigned long long)cap.bytesTransferred, cap.driftPpm);
+                  (unsigned long long)cap.bytesTransferred, cap.driftPpm,
+                  (unsigned long long)cap.ringOverruns,
+                  (unsigned long long)play.ringUnderruns);
         // Packet-level detail for the xrun budget: how far actual lengths
         // stray from nominal and how big the URB frame steps are.
         PROBE_LOG("stream: capBytesPerUrb=%llu playBytesPerUrb=%llu sfCap=%lld stepCap=%d "

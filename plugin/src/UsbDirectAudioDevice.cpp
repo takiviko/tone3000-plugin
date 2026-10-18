@@ -280,6 +280,12 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
       return lastError_;
     }
 
+    juce::Logger::writeToLog(
+        "USB Direct: config subslot=" + juce::String(static_cast<int>(config_.subslotBytes)) +
+        " play=0x" + juce::String::toHexString(config_.playbackEndpoint) +
+        " cap=0x" + juce::String::toHexString(config_.captureEndpoint) +
+        " fb=0x" + juce::String::toHexString(config_.feedbackEndpoint) +
+        " clock=" + juce::String(static_cast<int>(config_.clockSourceId)));
     transport_ = std::make_unique<UsbfsTransport>(fd_);
     if (!applyControl(*transport_, config_, lastError_)) {
       close();
@@ -316,6 +322,10 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
       close();
       return lastError_;
     }
+    // Priming the playback pool before the first capture URB is counted as
+    // an underrun by the ring policy; it is not a user-visible xrun.
+    baselineRingUnder_ = static_cast<int>(stream_->playbackStats().ringUnderruns);
+    baselineRingOver_ = static_cast<int>(stream_->captureStats().ringOverruns);
     open_ = true;
     juce::Logger::writeToLog("USB Direct: open " + juce::String(sampleRate_, 0) +
                              " Hz, " + juce::String(bufferFrames_) + "-frame blocks, " +
@@ -343,10 +353,9 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   bool isOpen() override { return open_; }
 
   void start(juce::AudioIODeviceCallback* callback) override {
-    if (!open_) return;
+    if (!open_ || playing_) return;
     callback_.store(callback);
     if (callback != nullptr) callback->audioDeviceAboutToStart(this);
-    if (playing_) return;
     if (stream_ != nullptr && !stream_->running()) {
       if (!stream_->start()) {
         lastError_ = "URB submission failed on restart";
@@ -400,10 +409,13 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
 
   int getXRunCount() const noexcept override {
     if (stream_ == nullptr) return 0;
+    const int ringOver = static_cast<int>(stream_->captureStats().ringOverruns) -
+                         baselineRingOver_;
+    const int ringUnder = static_cast<int>(stream_->playbackStats().ringUnderruns) -
+                          baselineRingUnder_;
     return static_cast<int>(stream_->captureStats().xruns +
-                            stream_->playbackStats().xruns +
-                            stream_->captureStats().ringOverruns +
-                            stream_->playbackStats().ringUnderruns);
+                            stream_->playbackStats().xruns) +
+           std::max(0, ringOver) + std::max(0, ringUnder);
   }
 
  private:
@@ -504,6 +516,8 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   int maxFrames_ = 50;
   double sampleRate_ = 48000.0;
   int fd_ = -1;
+  int baselineRingUnder_ = 0;
+  int baselineRingOver_ = 0;
   bool open_ = false;
   bool playing_ = false;
   juce::String lastError_;

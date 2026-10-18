@@ -141,6 +141,10 @@ StandaloneAudioSettings::StandaloneAudioSettings(TONE3000Processor& p,
             .getChildFile("usb_direct_test")
             .existsAsFile()) {
       dm->setCurrentAudioDeviceType("USB Direct", true);
+      juce::Logger::writeToLog(juce::String("USB Direct: select ")
+                               + (dm->getCurrentAudioDeviceType() == "USB Direct" ? "ok"
+                                                                                  : "failed")
+                               + ", current=" + dm->getCurrentAudioDeviceType());
       applyRememberedOrPreferredSetup();
     }
   }

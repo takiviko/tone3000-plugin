@@ -42,6 +42,8 @@ public final class UsbDirectBridge {
     public static void register(Activity activity) {
         activityRef = new WeakReference<>(activity);
         usbManager = (UsbManager) activity.getSystemService(Context.USB_SERVICE);
+        Log.i(TAG, "USB Direct: register usbManager=" + (usbManager != null)
+                + " devices=" + (usbManager != null ? usbManager.getDeviceList().size() : -1));
         if (receiversRegistered) return;
         receiversRegistered = true;
         IntentFilter permission = new IntentFilter(ACTION_PERMISSION);
@@ -71,11 +73,15 @@ public final class UsbDirectBridge {
     }
 
     public static boolean isAvailable() {
-        return findAudioDevice() != null;
+        UsbDevice d = findAudioDevice();
+        Log.i(TAG, "USB Direct: isAvailable=" + (d != null)
+                + " usbManager=" + (usbManager != null));
+        return d != null;
     }
 
     public static String deviceName() {
         UsbDevice d = findAudioDevice();
+        Log.i(TAG, "USB Direct: deviceName=" + (d != null ? d.getProductName() : "none"));
         if (d == null) return "USB audio device";
         String name = d.getProductName();
         return name != null && !name.isEmpty() ? name : "USB audio device";
@@ -121,7 +127,9 @@ public final class UsbDirectBridge {
     }
 
     public static byte[] getRawDescriptors() {
-        return connection != null ? connection.getRawDescriptors() : null;
+        byte[] raw = connection != null ? connection.getRawDescriptors() : null;
+        Log.i(TAG, "USB Direct: descriptors=" + (raw != null ? raw.length : -1));
+        return raw;
     }
 
     private static UsbDevice findAudioDevice() {

@@ -135,6 +135,10 @@ StandaloneAudioSettings::StandaloneAudioSettings(TONE3000Processor& p,
       if (type->getTypeName() == "USB Direct") hasUsbDirect = true;
     if (!hasUsbDirect)
       dm->addAudioDeviceType(std::make_unique<t3k::UsbDirectAudioIODeviceType>());
+    // addAudioDeviceType() does not scan; without this the marker switch
+    // below sees an empty device list and selects a device-less type.
+    for (auto* type : dm->getAvailableDeviceTypes())
+      if (type->getTypeName() == "USB Direct") type->scanForDevices();
     // Debug/measurement hook for the M3 run: the activity creates this
     // marker from `am start ... --ez usbDirect true`.
     if (juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
@@ -144,7 +148,11 @@ StandaloneAudioSettings::StandaloneAudioSettings(TONE3000Processor& p,
       juce::Logger::writeToLog(juce::String("USB Direct: select ")
                                + (dm->getCurrentAudioDeviceType() == "USB Direct" ? "ok"
                                                                                   : "failed")
-                               + ", current=" + dm->getCurrentAudioDeviceType());
+                               + ", current=" + dm->getCurrentAudioDeviceType() +
+                               ", device=" +
+                               (dm->getCurrentAudioDevice() != nullptr
+                                    ? dm->getCurrentAudioDevice()->getName()
+                                    : juce::String("none")));
       applyRememberedOrPreferredSetup();
     }
   }

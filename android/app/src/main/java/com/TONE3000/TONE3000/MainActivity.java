@@ -26,9 +26,10 @@ public class MainActivity extends JuceActivity
     @Override
     protected void onCreate (Bundle savedInstanceState)
     {
-        super.onCreate (savedInstanceState);
-
         // USB Direct (plan M3): the activity owns the USB permission prompt.
+        // Register *before* super.onCreate: JUCE can build the standalone
+        // holder/editor from the native onCreate, and the settings type scan
+        // needs a live UsbManager by then.
         UsbDirectBridge.register (this);
 
         // Debug hook for the automated M3 measurement: create or remove the
@@ -57,6 +58,8 @@ public class MainActivity extends JuceActivity
                 Log.w ("TONE3000", "USB Direct: could not write the test marker", e);
             }
         }
+
+        super.onCreate (savedInstanceState);
     }
 
     private boolean isDebuggable()

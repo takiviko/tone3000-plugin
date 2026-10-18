@@ -258,6 +258,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
 
     if (!bridgeReady()) {
       lastError_ = "USB Direct bridge is not initialised";
+      juce::Logger::writeToLog("USB Direct: open failed: " + lastError_);
       return lastError_;
     }
 
@@ -265,6 +266,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     const int fd = openJavaDevice();
     if (fd < 0) {
       lastError_ = "USB audio device unavailable (is it attached and permitted?)";
+      juce::Logger::writeToLog("USB Direct: open failed: " + lastError_);
       return lastError_;
     }
     fd_ = fd;
@@ -272,10 +274,12 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     const auto raw = javaDescriptors();
     if (raw.empty()) {
       lastError_ = "could not read the USB descriptors";
+      juce::Logger::writeToLog("USB Direct: open failed: " + lastError_);
       close();
       return lastError_;
     }
     if (!buildConfig(raw, sampleRate, config_, lastError_)) {
+      juce::Logger::writeToLog("USB Direct: open failed: " + lastError_);
       close();
       return lastError_;
     }
@@ -288,6 +292,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
         " clock=" + juce::String(static_cast<int>(config_.clockSourceId)));
     transport_ = std::make_unique<UsbfsTransport>(fd_);
     if (!applyControl(*transport_, config_, lastError_)) {
+      juce::Logger::writeToLog("USB Direct: open failed: " + lastError_);
       close();
       return lastError_;
     }
@@ -319,6 +324,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     stream_ = std::make_unique<UsbAudioStream>(config_, options, *transport_, *this);
     if (!stream_->start()) {
       lastError_ = "URB submission failed";
+      juce::Logger::writeToLog("USB Direct: open failed: " + lastError_);
       close();
       return lastError_;
     }

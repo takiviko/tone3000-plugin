@@ -78,9 +78,14 @@ public final class UsbShell {
         return Build.VERSION.SDK_INT >= 33 ? Context.RECEIVER_EXPORTED : 0;
     }
 
-    /** Find the first device exposing a USB Audio class interface and ask for
-        permission. Returns the device (or null when nothing is attached). */
+    /** Find the first device exposing a USB Audio class interface. The
+        activity owns the permission prompt (the system dismisses it when a
+        service requests it); pass true there, false from the service. */
     public UsbDevice findAudioDevice() {
+        return findAudioDevice(true);
+    }
+
+    public UsbDevice findAudioDevice(boolean requestPermission) {
         HashMap<String, UsbDevice> devices = usbManager.getDeviceList();
         listener.onLog("usb: " + devices.size() + " device(s) on the bus");
         for (UsbDevice device : devices.values()) {
@@ -99,6 +104,8 @@ public final class UsbShell {
 
             if (usbManager.hasPermission(device)) {
                 openAndClaim(device);
+            } else if (!requestPermission) {
+                listener.onLog("usb: permission not granted; drive the activity once to grant it");
             } else {
                 listener.onLog("usb: requesting permission for " + deviceName(device));
                 // Targeting U+: a FLAG_MUTABLE PendingIntent must carry an

@@ -193,6 +193,10 @@ class UsbfsTransport : public UrbTransport {
     return true;
   }
 
+  /** A fresh control-path session can reuse the same fd after the previous
+      stream quiesced on a transient ioctl error. */
+  void clearDeviceGone() { deviceGone_ = false; }
+
   /** SET_INTERFACE via the dedicated ioctl (start/stop a stream). */
   bool setInterface(int interfaceNumber, int altSetting) {
     usbdevfs_setinterface set{};
@@ -327,22 +331,99 @@ StreamConfig configFrom(int rate, int channels, int subslot, const uint8_t* raw,
   return cfg;
 }
 
-std::string openStream(int fd, const StreamConfig& cfg, int packetsPerUrb,
-                       int urbsInFlight) {
-  std::lock_guard<std::mutex> lock(g_session.mutex);
-  if (g_session.stream != nullptr) return "already running";
-  g_session.transport = std::make_unique<UsbfsTransport>(fd);
-  UsbfsTransport* transport = g_session.transport.get();
+void pumpThreadMain() {
+  auto lastLog = std::chrono::steady_clock::now();
+  while (!g_session.stopRequested.load()) {
+    if (!g_session.stream->pumpOnce(50)) {
+      if (!g_session.stream->running()) break;  // device gone: exit cleanly
+      continue;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - lastLog > std::chrono::seconds(5)) {
+      lastLog = now;
+      const auto& cap = g_session.stream->captureStats();
+      const auto& play = g_session.stream->playbackStats();
+      PROBE_LOG("stream: capUrb=%llu capPkts=%llu playUrb=%llu playPkts=%llu xruns=%llu "
+                "bytes=%llu drift=%.1f ringOver=%llu ringUnder=%llu",
+                (unsigned long long)cap.urbsReaped, (unsigned long long)cap.packets,
+                (unsigned long long)play.urbsReaped, (unsigned long long)play.packets,
+                (unsigned long long)(cap.xruns + play.xruns),
+                (unsigned long long)cap.bytesTransferred, cap.driftPpm,
+                (unsigned long long)cap.ringOverruns,
+                (unsigned long long)play.ringUnderruns);
+      // Packet-level detail for the xrun budget: how far actual lengths
+      // stray from nominal and how big the URB frame steps are.
+      PROBE_LOG("stream: capBytesPerUrb=%llu playBytesPerUrb=%llu sfCap=%lld stepCap=%d "
+                "sfPlay=%lld stepPlay=%d",
+                (unsigned long long)(cap.bytesTransferred /
+                                     std::max<uint64_t>(cap.urbsReaped, 1)),
+                (unsigned long long)(play.bytesTransferred /
+                                     std::max<uint64_t>(play.urbsReaped, 1)),
+                (long long)cap.lastStartFrame, cap.startFrameStep,
+                (long long)play.lastStartFrame, play.startFrameStep);
+      const auto& fb = g_session.stream->feedbackStats();
+      if (g_session.config.feedbackEndpoint != 0) {
+        PROBE_LOG("stream: fbUrb=%llu fbPkts=%llu fbErr=%llu fbVal=%.5f fbDrift=%.1f",
+                  (unsigned long long)fb.urbsReaped,
+                  (unsigned long long)fb.feedbackPackets,
+                  (unsigned long long)fb.feedbackErrors, fb.feedbackValue,
+                  fb.driftPpm);
+      }
+      PROBE_LOG("stream: submitFail=%llu submitRetry=%llu",
+                (unsigned long long)(cap.submitFailures + play.submitFailures),
+                (unsigned long long)(cap.submitRetries + play.submitRetries));
+    }
+  }
+}
 
-  // Rate first, then SET_INTERFACE (plan pitfall 2).
+// Rate first, then SET_INTERFACE (plan pitfall 2), with a GET_CUR readback
+// where the device supports it (M2.3 requires the readback).
+std::string applyRateAndInterfaces(UsbfsTransport& transport, const StreamConfig& cfg,
+                                   std::string& detail) {
   if (cfg.uac == t3k::usb::UacVersion::uac2) {
     std::vector<uint8_t> resp;
-    transport->control(t3k::usb::uac::uac2SetSampleRate(cfg.controlInterface,
-                                                        cfg.clockSourceId, cfg.sampleRate),
-                       resp);
+    if (!transport.control(t3k::usb::uac::uac2SetSampleRate(
+                               cfg.controlInterface, cfg.clockSourceId, cfg.sampleRate),
+                           resp)) {
+      return "SET_CUR sample rate failed";
+    }
+    std::vector<uint8_t> cur;
+    if (transport.control(t3k::usb::uac::uac2GetSampleRate(cfg.controlInterface,
+                                                           cfg.clockSourceId),
+                          cur) &&
+        cur.size() >= 4) {
+      const uint32_t got = static_cast<uint32_t>(cur[0]) |
+                           (static_cast<uint32_t>(cur[1]) << 8) |
+                           (static_cast<uint32_t>(cur[2]) << 16) |
+                           (static_cast<uint32_t>(cur[3]) << 24);
+      detail = "readback=" + std::to_string(got);
+      if (got != cfg.sampleRate) return "rate readback mismatch";
+    } else {
+      detail = "readback=unavailable";
+    }
+  } else {
+    std::vector<uint8_t> resp;
+    transport.control(
+        t3k::usb::uac::uac1SetSampleRate(cfg.playbackEndpoint, cfg.sampleRate), resp);
+    detail = "readback=uac1-unverified";
   }
-  transport->setInterface(cfg.playbackInterface, cfg.playbackAltsetting);
-  transport->setInterface(cfg.captureInterface, cfg.captureAltsetting);
+  if (!transport.setInterface(cfg.playbackInterface, cfg.playbackAltsetting)) {
+    return "SET_INTERFACE playback failed";
+  }
+  if (cfg.captureEndpoint != 0 &&
+      !transport.setInterface(cfg.captureInterface, cfg.captureAltsetting)) {
+    return "SET_INTERFACE capture failed";
+  }
+  return "";
+}
+
+// Assumes g_session.mutex is held and the transport exists. Sets the rate,
+// selects the altsettings, starts the URB machine and the pump thread.
+std::string startStreamLocked(const StreamConfig& cfg, int packetsPerUrb,
+                              int urbsInFlight, std::string& detail) {
+  UsbfsTransport* transport = g_session.transport.get();
+  const std::string err = applyRateAndInterfaces(*transport, cfg, detail);
+  if (!err.empty()) return err;
 
   t3k::usb::UsbAudioStream::Options opts;
   opts.packetsPerUrb = packetsPerUrb;
@@ -361,51 +442,49 @@ std::string openStream(int fd, const StreamConfig& cfg, int packetsPerUrb,
     return "URB submission failed";
   }
   g_session.stopRequested = false;
-  g_session.pump = std::thread([] {
-    auto lastLog = std::chrono::steady_clock::now();
-    while (!g_session.stopRequested.load()) {
-      if (!g_session.stream->pumpOnce(50)) {
-        if (!g_session.stream->running()) break;  // device gone: exit cleanly
-        continue;
-      }
-      const auto now = std::chrono::steady_clock::now();
-      if (now - lastLog > std::chrono::seconds(5)) {
-        lastLog = now;
-        const auto& cap = g_session.stream->captureStats();
-        const auto& play = g_session.stream->playbackStats();
-        PROBE_LOG("stream: capUrb=%llu capPkts=%llu playUrb=%llu playPkts=%llu xruns=%llu "
-                  "bytes=%llu drift=%.1f ringOver=%llu ringUnder=%llu",
-                  (unsigned long long)cap.urbsReaped, (unsigned long long)cap.packets,
-                  (unsigned long long)play.urbsReaped, (unsigned long long)play.packets,
-                  (unsigned long long)(cap.xruns + play.xruns),
-                  (unsigned long long)cap.bytesTransferred, cap.driftPpm,
-                  (unsigned long long)cap.ringOverruns,
-                  (unsigned long long)play.ringUnderruns);
-        // Packet-level detail for the xrun budget: how far actual lengths
-        // stray from nominal and how big the URB frame steps are.
-        PROBE_LOG("stream: capBytesPerUrb=%llu playBytesPerUrb=%llu sfCap=%lld stepCap=%d "
-                  "sfPlay=%lld stepPlay=%d",
-                  (unsigned long long)(cap.bytesTransferred /
-                                       std::max<uint64_t>(cap.urbsReaped, 1)),
-                  (unsigned long long)(play.bytesTransferred /
-                                       std::max<uint64_t>(play.urbsReaped, 1)),
-                  (long long)cap.lastStartFrame, cap.startFrameStep,
-                  (long long)play.lastStartFrame, play.startFrameStep);
-        const auto& fb = g_session.stream->feedbackStats();
-        if (g_session.config.feedbackEndpoint != 0) {
-          PROBE_LOG("stream: fbUrb=%llu fbPkts=%llu fbErr=%llu fbVal=%.5f fbDrift=%.1f",
-                    (unsigned long long)fb.urbsReaped,
-                    (unsigned long long)fb.feedbackPackets,
-                    (unsigned long long)fb.feedbackErrors, fb.feedbackValue,
-                    fb.driftPpm);
-        }
-      }
-    }
-  });
+  g_session.pump = std::thread(pumpThreadMain);
   PROBE_LOG("stream: start rate=%u ch=%u subslot=%u playback=0x%02x capture=0x%02x fb=0x%02x",
             cfg.sampleRate, cfg.channels, cfg.subslotBytes, cfg.playbackEndpoint,
             cfg.captureEndpoint, cfg.feedbackEndpoint);
   return "";
+}
+
+std::string openStream(int fd, const StreamConfig& cfg, int packetsPerUrb,
+                       int urbsInFlight) {
+  std::lock_guard<std::mutex> lock(g_session.mutex);
+  if (g_session.stream != nullptr) return "already running";
+  g_session.transport = std::make_unique<UsbfsTransport>(fd);
+  std::string detail;
+  return startStreamLocked(cfg, packetsPerUrb, urbsInFlight, detail);
+}
+
+// Full stop/start across a rate change (plan M2.3): stop the stream, return
+// both endpoints to altsetting 0, SET_CUR the new rate, verify GET_CUR,
+// select the altsettings again and restart the pump.
+std::string changeRate(int fd, const StreamConfig& requested, int rate, int packetsPerUrb,
+                       int urbsInFlight) {
+  std::lock_guard<std::mutex> lock(g_session.mutex);
+  if (g_session.stream == nullptr) return "not running";
+  g_session.stopRequested = true;
+  if (g_session.pump.joinable()) g_session.pump.join();
+  g_session.stream->stop();
+  g_session.stream.reset();
+
+  UsbfsTransport* transport = g_session.transport.get();
+  transport->setInterface(g_session.config.playbackInterface, 0);
+  transport->setInterface(g_session.config.captureInterface, 0);
+  transport->clearDeviceGone();
+
+  StreamConfig cfg = requested;
+  cfg.sampleRate = static_cast<uint32_t>(rate);
+  std::string detail;
+  const std::string err = startStreamLocked(cfg, packetsPerUrb, urbsInFlight, detail);
+  if (!err.empty()) {
+    PROBE_LOG("rate: switch to %d failed: %s", rate, err.c_str());
+    return err;
+  }
+  PROBE_LOG("rate: switch to %d ok (%s)", rate, detail.c_str());
+  return "rate=" + std::to_string(rate) + " " + detail;
 }
 
 std::string closeStream() {
@@ -425,6 +504,37 @@ std::string closeStream() {
             (unsigned long long)(cap.xruns + play.xruns), cap.driftPpm);
   g_session.transport.reset();
   return "";
+}
+
+// One-line snapshot for the adb scenario driver (script/usb-scenarios.sh):
+// counters only, no parsing of the 5 s log cadence.
+std::string statusLine() {
+  std::lock_guard<std::mutex> lock(g_session.mutex);
+  if (g_session.stream == nullptr) {
+    char idle[64];
+    std::snprintf(idle, sizeof(idle), "status: running=0 rate=%u",
+                  g_session.config.sampleRate);
+    return idle;
+  }
+  const auto& cap = g_session.stream->captureStats();
+  const auto& play = g_session.stream->playbackStats();
+  const auto& fb = g_session.stream->feedbackStats();
+  char line[512];
+  std::snprintf(
+      line, sizeof(line),
+      "status: running=%d rate=%u capUrb=%llu capPkts=%llu playUrb=%llu playPkts=%llu "
+      "xruns=%llu ringOver=%llu ringUnder=%llu submitFail=%llu submitRetry=%llu "
+      "fbErr=%llu fbVal=%.5f drift=%.1f",
+      g_session.stream->running() ? 1 : 0, g_session.config.sampleRate,
+      (unsigned long long)cap.urbsReaped, (unsigned long long)cap.packets,
+      (unsigned long long)play.urbsReaped, (unsigned long long)play.packets,
+      (unsigned long long)(cap.xruns + play.xruns),
+      (unsigned long long)cap.ringOverruns,
+      (unsigned long long)play.ringUnderruns,
+      (unsigned long long)(cap.submitFailures + play.submitFailures),
+      (unsigned long long)(cap.submitRetries + play.submitRetries),
+      (unsigned long long)fb.feedbackErrors, fb.feedbackValue, cap.driftPpm);
+  return line;
 }
 
 }  // namespace
@@ -599,6 +709,30 @@ Java_com_TONE3000_USBCHECK_NativeBridge_nativeSweep(JNIEnv* env, jclass, jint fd
     }
   }
   return env->NewStringUTF(rows.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeSetRate(
+    JNIEnv* env, jclass, jint fd, jbyteArray rawDescriptors, jint vid, jint pid, jint rate,
+    jint channels, jint subslot, jint packetsPerUrb, jint urbsInFlight) {
+  const std::vector<uint8_t> raw = bytesFrom(env, rawDescriptors);
+  const StreamConfig requested =
+      configFrom(rate, channels, subslot, raw.data(), raw.size(), vid, pid);
+  const std::string result =
+      changeRate(fd, requested, rate, packetsPerUrb, urbsInFlight);
+  return env->NewStringUTF(result.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeStatus(JNIEnv* env, jclass) {
+  return env->NewStringUTF(statusLine().c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeDiscardOne(JNIEnv* env, jclass) {
+  std::lock_guard<std::mutex> lock(g_session.mutex);
+  const int n = g_session.stream != nullptr ? g_session.stream->discardOneInFlight() : 0;
+  return env->NewStringUTF(("discard=" + std::to_string(n)).c_str());
 }
 
 }  // extern "C"

@@ -1,35 +1,78 @@
 package com.TONE3000.USBCHECK;
 
 import android.app.Activity;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbDeviceConnection;
+import android.hardware.usb.UsbManager;
+import android.os.Build;
 import android.os.Bundle;
-import android.util.Log;
+import android.os.IBinder;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-
 /**
- * Probe UI (plan section 4, L1): one button per mode, a scrolling log, and a
- * "mode" intent extra so the iteration loop can drive everything over adb
- * (script/android-dev.sh). Modes: dump (descriptor tree + fixtures), stream
- * (sustained duplex with xrun/URB stats), rtl (self-measurement, section
- * 4.1), sweep (rtl across the URB layout matrix, plan M1.6).
+ * Probe UI (plan section 4, L1). The session itself lives in ProbeService so
+ * that the stream survives this activity and the screen turning off; this
+ * class shows the log, forwards commands, and owns the USB permission
+ * prompt (the system dismisses the dialog when a service requests it).
+ *
+ * Every mode can also be driven over adb:
+ *   adb shell am start -n com.TONE3000.USBCHECK/.MainActivity -e mode stream
+ *   adb shell am startservice -n com.TONE3000.USBCHECK/.ProbeService -e mode status
  */
-public final class MainActivity extends Activity implements UsbShell.Listener {
-    private static final String TAG = UsbShell.TAG;
+public final class MainActivity extends Activity implements ProbeService.Listener {
+    private static final String ACTION_PERMISSION = "com.TONE3000.USBCHECK.ACTIVITY_PERMISSION";
 
-    private UsbShell shell;
     private TextView logView;
-    private boolean streaming = false;
-    private int activeFd = -1;
+    private final StringBuilder logText = new StringBuilder();
+    private ProbeService service;
+    private boolean bound;
+    private UsbManager usbManager;
+
+    private String pendingMode;
+    private int pendingRate = 48000;
+    private int pendingPackets = 2;
+    private int pendingUrbs = 3;
+    private boolean receiverRegistered;
+
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder binder) {
+            service = ((ProbeService.LocalBinder) binder).getService();
+            bound = true;
+            service.addListener(MainActivity.this);
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            service = null;
+            bound = false;
+        }
+    };
+
+    private final BroadcastReceiver permissionReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!ACTION_PERMISSION.equals(intent.getAction())) return;
+            boolean granted =
+                    intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
+            log("usb: permission " + (granted ? "granted" : "denied"));
+            if (granted && pendingMode != null) {
+                ProbeService.sendMode(MainActivity.this, pendingMode, pendingRate,
+                        pendingPackets, pendingUrbs);
+                pendingMode = null;
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -38,14 +81,20 @@ public final class MainActivity extends Activity implements UsbShell.Listener {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
 
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.addView(modeButton("dump", "Dump"));
-        buttons.addView(modeButton("stream", "Stream"));
-        buttons.addView(modeButton("rtl", "RTL"));
-        buttons.addView(modeButton("sweep", "Sweep"));
-        buttons.addView(modeButton("stop", "Stop"));
-        root.addView(buttons);
+        LinearLayout top = new LinearLayout(this);
+        top.addView(modeButton("dump", "Dump"));
+        top.addView(modeButton("stream", "Stream"));
+        top.addView(modeButton("rtl", "RTL"));
+        top.addView(modeButton("sweep", "Sweep"));
+        top.addView(modeButton("stop", "Stop"));
+        root.addView(top);
+
+        LinearLayout recovery = new LinearLayout(this);
+        recovery.addView(rateButton(48000, "48k"));
+        recovery.addView(rateButton(96000, "96k"));
+        recovery.addView(modeButton("status", "Status"));
+        recovery.addView(modeButton("discard", "Drop URB"));
+        root.addView(recovery);
 
         logView = new TextView(this);
         logView.setGravity(Gravity.BOTTOM);
@@ -55,161 +104,118 @@ public final class MainActivity extends Activity implements UsbShell.Listener {
         root.addView(scroll);
         setContentView(root);
 
-        shell = new UsbShell(this, this);
-        shell.start();
-
-        String mode = getIntent().getStringExtra("mode");
-        if (mode != null) {
-            log("mode: " + mode + " (from intent)");
-            runMode(mode);
+        usbManager = getSystemService(UsbManager.class);
+        IntentFilter filter = new IntentFilter(ACTION_PERMISSION);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(permissionReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
-            log("ready: tap a mode (or am start -e mode dump)");
+            registerReceiver(permissionReceiver, filter);
         }
+        receiverRegistered = true;
+
+        startService(new Intent(this, ProbeService.class));
+        bindService(new Intent(this, ProbeService.class), connection, Context.BIND_AUTO_CREATE);
+        handleIntent(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        String mode = intent.getStringExtra("mode");
-        if (mode != null) {
-            log("mode: " + mode + " (from intent)");
-            runMode(mode);
-        }
+        handleIntent(intent);
     }
 
     @Override
     protected void onDestroy() {
-        NativeBridge.nativeStop();
-        shell.stop();
+        if (receiverRegistered) {
+            unregisterReceiver(permissionReceiver);
+            receiverRegistered = false;
+        }
+        if (bound) {
+            if (service != null) service.removeListener(this);
+            unbindService(connection);
+            bound = false;
+        }
+        // Deliberately do not stop the service or the stream: the probe is
+        // meant to keep running with the screen off.
         super.onDestroy();
+    }
+
+    private void handleIntent(Intent intent) {
+        String mode = intent != null ? intent.getStringExtra("mode") : null;
+        if (mode == null) {
+            log("ready: tap a mode (or am start ... -e mode dump)");
+            return;
+        }
+        int rate = intent.getIntExtra("rate", 48000);
+        int packets = intent.getIntExtra("packets", 2);
+        int urbs = intent.getIntExtra("urbs", 3);
+        log("mode: " + mode + " (from intent)");
+        dispatch(mode, rate, packets, urbs);
+    }
+
+    /** Owns the permission prompt; the service is only told about the mode
+        once the grant exists. */
+    private void dispatch(String mode, int rate, int packets, int urbs) {
+        UsbDevice device = findAudioDevice();
+        if (device == null) {
+            log("usb: no USB Audio device attached");
+            return;
+        }
+        if (usbManager.hasPermission(device)) {
+            ProbeService.sendMode(this, mode, rate, packets, urbs);
+            return;
+        }
+        pendingMode = mode;
+        pendingRate = rate;
+        pendingPackets = packets;
+        pendingUrbs = urbs;
+        log("usb: requesting permission for " + device.getProductName());
+        Intent reply = new Intent(ACTION_PERMISSION);
+        reply.setPackage(getPackageName());
+        PendingIntent pi = PendingIntent.getBroadcast(
+                this, 0, reply, PendingIntent.FLAG_MUTABLE);
+        usbManager.requestPermission(device, pi);
+    }
+
+    private UsbDevice findAudioDevice() {
+        for (UsbDevice device : usbManager.getDeviceList().values()) {
+            for (int i = 0; i < device.getInterfaceCount(); ++i) {
+                if (device.getInterface(i).getInterfaceClass()
+                        == android.hardware.usb.UsbConstants.USB_CLASS_AUDIO) {
+                    return device;
+                }
+            }
+        }
+        return null;
     }
 
     private Button modeButton(final String mode, String label) {
         Button b = new Button(this);
         b.setText(label);
-        b.setOnClickListener(v -> runMode(mode));
+        b.setOnClickListener(v -> dispatch(mode, 48000, 2, 3));
         return b;
     }
 
-    private void runMode(String mode) {
-        UsbDevice device = shell.getActiveDevice();
-        if (!"stop".equals(mode) && device == null) {
-            log("no device yet: enumerating");
-            // Set the pending mode first: when permission is already granted,
-            // findAudioDevice() reaches onDeviceReady synchronously.
-            pendingMode = mode;
-            shell.findAudioDevice();
-            return;
-        }
-        switch (mode) {
-            case "dump":
-                runDump();
-                break;
-            case "stream":
-                runStream();
-                break;
-            case "rtl":
-                runRtl();
-                break;
-            case "sweep":
-                runSweep();
-                break;
-            case "stop":
-                log("stop: " + NativeBridge.nativeStop());
-                streaming = false;
-                break;
-            default:
-                log("unknown mode: " + mode);
-                break;
-        }
+    private Button rateButton(final int rate, String label) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setOnClickListener(v -> dispatch("rate", rate, 2, 3));
+        return b;
     }
 
-    private String pendingMode = null;
-
-    private void runDump() {
-        byte[] raw = shell.getRawDescriptors();
-        UsbDevice device = shell.getActiveDevice();
-        if (raw == null || device == null) {
-            log("dump: no raw descriptors (device not open)");
-            return;
-        }
-        // Save the fixture for the L0 parser tests (plan M1.3).
-        String name = "ams22-descriptors.bin";
-        try (FileOutputStream out = openFileOutput(name, MODE_PRIVATE)) {
-            out.write(raw);
-            log("dump: wrote files/" + name + " (" + raw.length + " bytes)");
-        } catch (IOException e) {
-            log("dump: fixture write failed: " + e.getMessage());
-        }
-        String tree = NativeBridge.nativeDump(raw, device.getVendorId(), device.getProductId());
-        for (String line : tree.split("\n")) log(line);
-    }
-
-    private void runStream() {
-        UsbDevice device = shell.getActiveDevice();
-        if (device == null) return;
-        String err = NativeBridge.nativeStart(
-                activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
-                48000, 2, 3, 8, 3);
-        log("stream: " + (err.isEmpty() ? "running (48 kHz/2ch/subslot 3, 3x8)" : err));
-        streaming = err.isEmpty();
-    }
-
-    private void runRtl() {
-        UsbDevice device = shell.getActiveDevice();
-        if (device == null) return;
-        String rows = NativeBridge.nativeRtl(
-                activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
-                48000, 2, 3, 8, 3, 5);
-        appendCsv(rows);
-        for (String line : rows.split("\n")) log(line);
-    }
-
-    private void runSweep() {
-        UsbDevice device = shell.getActiveDevice();
-        if (device == null) return;
-        String rows = NativeBridge.nativeSweep(
-                activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
-                48000, 2, 3);
-        appendCsv(rows);
-        for (String line : rows.split("\n")) log(line);
-    }
-
-    private void appendCsv(String rows) {
-        if (rows == null || rows.isEmpty()) return;
-        try (FileOutputStream out = openFileOutput("rtl.csv", MODE_APPEND)) {
-            out.write((rows + "\n").getBytes(StandardCharsets.UTF_8));
-            log("csv: appended to files/rtl.csv");
-        } catch (IOException e) {
-            log("csv: write failed: " + e.getMessage());
-        }
+    @Override
+    public void onLog(final String line) {
+        runOnUiThread(() -> {
+            logText.append(line).append('\n');
+            if (logText.length() > 200_000) {
+                logText.delete(0, logText.length() - 150_000);
+            }
+            logView.setText(logText);
+        });
     }
 
     private void log(String line) {
-        Log.i(TAG, line);
-        logView.append(line + "\n");
-    }
-
-    @Override
-    public void onLog(String line) {
-        log(line);
-    }
-
-    @Override
-    public void onDeviceReady(UsbDevice device, UsbDeviceConnection connection, int fd) {
-        activeFd = fd;
-        log("device ready: fd=" + fd);
-        if (pendingMode != null) {
-            String mode = pendingMode;
-            pendingMode = null;
-            runMode(mode);
-        }
-    }
-
-    @Override
-    public void onDeviceDetached() {
-        streaming = false;
-        log("stream stopped: device detached");
+        onLog(line);
     }
 }

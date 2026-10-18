@@ -43,4 +43,17 @@ public final class NativeBridge {
         and return one CSV row per configuration. */
     public static native String nativeSweep(int fd, byte[] rawDescriptors, int vid, int pid,
                                             int rate, int channels, int subslot);
+
+    /** Stop/start across a rate change (plan M2.3): SET_CUR + GET_CUR
+        readback + SET_INTERFACE, with the stream restarted at the new rate.
+        Returns "rate=... readback=..." or an error string. */
+    public static native String nativeSetRate(int fd, byte[] rawDescriptors, int vid, int pid,
+                                              int rate, int channels, int subslot,
+                                              int packetsPerUrb, int urbsInFlight);
+
+    /** One-line counter snapshot for the adb scenario driver. */
+    public static native String nativeStatus();
+
+    /** Recovery hook: cancel one in-flight URB to simulate an error burst. */
+    public static native String nativeDiscardOne();
 }

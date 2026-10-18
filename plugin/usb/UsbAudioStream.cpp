@@ -240,6 +240,10 @@ void UsbAudioStream::stop() {
 bool UsbAudioStream::pumpOnce(int timeoutMs) {
   Urb* urb = transport_.reap(timeoutMs);
   if (urb == nullptr) {
+    if (transport_.deviceGone()) {
+      running_ = false;  // unplug during operation: quiesce (plan pitfall 4)
+      return false;
+    }
     if (running_) noteXrun(captureStats_);  // late reap: deadlines slipped
     return false;
   }

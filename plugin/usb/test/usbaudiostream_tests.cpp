@@ -33,6 +33,9 @@ struct FakeTransport : UrbTransport {
   std::vector<Urb*> completed;
   int discards = 0;
   bool rejectSubmits = false;
+  bool gone = false;
+
+  bool deviceGone() const override { return gone; }
 
   bool submit(Urb* urb) override {
     if (rejectSubmits) return false;
@@ -291,6 +294,22 @@ TEST(UsbAudioStream, StopDiscardsAndCollectsEverything) {
   EXPECT_EQ(transport.discards, 6);
   EXPECT_EQ(stream.inFlightCount(), 0);  // all reaped back
   EXPECT_FALSE(stream.running());
+}
+
+TEST(UsbAudioStream, TransportErrorQuiescesInsteadOfXrunning) {
+  // Unplug mid-stream: reap reports a fatal error (no URB comes back). The
+  // machine must go quiescent, not count a late reap every timeout.
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+  transport.gone = true;
+  EXPECT_FALSE(stream.pumpOnce(0));
+  EXPECT_FALSE(stream.running());
+  EXPECT_EQ(stream.captureStats().xruns, 0u);
+  // Further pumps stay quiet too.
+  EXPECT_FALSE(stream.pumpOnce(0));
+  EXPECT_EQ(stream.captureStats().xruns, 0u);
 }
 
 TEST(UsbAudioStream, LateReapTimeoutCountsXrun) {

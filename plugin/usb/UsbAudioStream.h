@@ -64,6 +64,10 @@ class UrbTransport {
   virtual Urb* reap(int timeoutMs) = 0;
   /** Ask the kernel to cancel an in-flight URB (it will still be reaped). */
   virtual void discard(Urb* urb) = 0;
+  /** True once the transport has seen a fatal error (device unplugged:
+      reap returns -ENODEV/-ENOTTY/-ESHUTDOWN instead of URBs). The stream
+      machine goes quiescent instead of counting xruns forever. */
+  virtual bool deviceGone() const { return false; }
 };
 
 class UsbAudioStream {

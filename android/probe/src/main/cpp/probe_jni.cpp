@@ -135,7 +135,12 @@ class UsbfsTransport : public UrbTransport {
         return urb;
       }
       if (errno != EAGAIN && errno != EWOULDBLOCK) {
-        PROBE_LOG("err: REAPURB errno=%d", errno);
+        // Fatal for the fd: the device is gone (unplug gives ENOTTY/ENODEV/
+        // ESHUTDOWN depending on the kernel). Report it once and stop.
+        if (!deviceGone_) {
+          deviceGone_ = true;
+          PROBE_LOG("stream: device gone (REAPURB errno=%d)", errno);
+        }
         return nullptr;
       }
       if (std::chrono::steady_clock::now() >= deadline) return nullptr;
@@ -212,7 +217,10 @@ class UsbfsTransport : public UrbTransport {
     return raw;
   }
 
+  bool deviceGone() const override { return deviceGone_; }
+
   int fd_;
+  bool deviceGone_ = false;
   std::map<Urb*, std::unique_ptr<KernelUrb>> map_;
 };
 
@@ -353,7 +361,10 @@ std::string openStream(int fd, const StreamConfig& cfg, int packetsPerUrb,
   g_session.pump = std::thread([] {
     auto lastLog = std::chrono::steady_clock::now();
     while (!g_session.stopRequested.load()) {
-      if (!g_session.stream->pumpOnce(50)) continue;
+      if (!g_session.stream->pumpOnce(50)) {
+        if (!g_session.stream->running()) break;  // device gone: exit cleanly
+        continue;
+      }
       const auto now = std::chrono::steady_clock::now();
       if (now - lastLog > std::chrono::seconds(5)) {
         lastLog = now;

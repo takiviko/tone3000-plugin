@@ -495,6 +495,13 @@ if (NOT HEADLESS)
         # below) since neither needs anything from the NDK sysroot.
         target_sources(${PROJECT_NAME} PRIVATE src/WindowKeyEvents.cpp)
         target_sources(${PROJECT_NAME} PRIVATE src/AudioPermissions.cpp)
+        # USB Direct (plan M3): raw usbfs transport + juce::AudioIODevice.
+        target_sources(${PROJECT_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/usb/android/UsbfsTransport.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/UsbDirectAudioDevice.cpp)
+        target_include_directories(${PROJECT_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR})
+        target_link_libraries(${PROJECT_NAME} PRIVATE t3k_usb_audio)
     else()
         # Space passthrough to the host DAW (see WindowKeyEvents.cpp).
         target_sources(${PROJECT_NAME} PRIVATE src/WindowKeyEvents.cpp)

@@ -308,6 +308,40 @@ token exchange failed with `token_exchange_failed` until both were in.
 - Space/Enter passthrough is a no-op (`WindowKeyEvents.cpp`): the app is its
   own host.
 
+## USB Direct audio driver (experimental)
+
+Android's stock audio path (Oboe -> AAudio -> AudioFlinger -> `snd-usb-audio`)
+measured 88 ms end to end on the Samsung Tab S10 FE + Zoom AMS-22 rig and
+jittered under DSP load. "USB Direct" bypasses that stack: the app claims the
+interface's AudioControl/AudioStreaming interfaces and drives isochronous URBs
+through `USBDEVFS_*` ioctls from native code. Oboe remains available and is
+still the default.
+
+**Enable it:** Settings -> Audio Driver -> **USB Direct** (the picker appears
+when more than one backend is available). The first use shows the standard
+Android USB permission prompt; accepting it is required. The app keeps the
+device claimed while it runs. Releasing the interface does not make the
+kernel's `snd-usb-audio` rebind on this tablet, so switching back to Oboe
+needs a physical replug of the AMS-22.
+
+**Automation:** in debuggable builds,
+`adb shell am start -n com.TONE3000.TONE3000/.MainActivity --ez usbDirect true`
+selects USB Direct on the next launch (the marker lives in the app's data
+dir); `--ez usbDirect false` clears it. Grant the USB permission once in a
+normal launch first, then relaunch with the marker.
+
+**Measurement:** the probe's `script/usb-scenarios.sh` measures the driver
+core (digital-loop RTL, xruns, drift, screen-off soaks); the PC rig's
+`script/rtl_pc.py` measures the full app path. Current core numbers at the
+shipping layout (8 packets x 4 URBs, 128-frame ring, 48 kHz): 7,990
+packets/s (nominal 8,000), zero xruns/overruns, **5.52 ms digital-loop
+RTL**. Full evidence: `plugin/docs/usb-audio/`.
+
+**Limitations:** the AMS-22 is the only validated device; 44.1/88.2 kHz
+need fractional microframe packets and are not exposed (the app is pinned at
+48 kHz); the AMS-22 does not answer the UAC2 GET_CUR rate readback, so the
+set rate is verified through feedback and cadence; UAC1 is host-tested only.
+
 ## Known gaps
 
 - Only Linux has been used as a build host so far. The macOS and Windows

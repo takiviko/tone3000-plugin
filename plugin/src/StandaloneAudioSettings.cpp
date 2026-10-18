@@ -4,6 +4,10 @@
 #include "IosAudioRoute.h"
 #include "Processor.h"
 
+#if JUCE_ANDROID
+#include "UsbDirectAudioDevice.h"
+#endif
+
 #include <cmath>
 
 // The standalone filter window header expects the full GUI/audio module set
@@ -122,6 +126,25 @@ StandaloneAudioSettings::StandaloneAudioSettings(TONE3000Processor& p,
   jassert(isAvailable());
   if (auto* dm = deviceManager())
     dm->addChangeListener(this);
+#if JUCE_ANDROID
+  // USB Direct (plan M3/D4): register the custom type next to Oboe. Oboe
+  // stays the default; this only adds "USB Direct" to the driver picker.
+  if (auto* dm = deviceManager()) {
+    bool hasUsbDirect = false;
+    for (auto* type : dm->getAvailableDeviceTypes())
+      if (type->getTypeName() == "USB Direct") hasUsbDirect = true;
+    if (!hasUsbDirect)
+      dm->addAudioDeviceType(std::make_unique<t3k::UsbDirectAudioIODeviceType>());
+    // Debug/measurement hook for the M3 run: the activity creates this
+    // marker from `am start ... --ez usbDirect true`.
+    if (juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+            .getChildFile("usb_direct_test")
+            .existsAsFile()) {
+      dm->setCurrentAudioDeviceType("USB Direct", true);
+      applyRememberedOrPreferredSetup();
+    }
+  }
+#endif
   // iOS: Measurement mode, and no Bluetooth headset mic route (see
   // IosAudioRoute.h). No-op off iOS.
   applyRawInputMode();

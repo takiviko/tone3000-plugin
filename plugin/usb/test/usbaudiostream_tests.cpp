@@ -249,13 +249,21 @@ TEST(UsbAudioStream, StartFrameGapCountsXrun) {
   RecordingCallback cb;
   UsbAudioStream stream(testConfig(), {}, transport, cb);
   ASSERT_TRUE(stream.start());
+  // Two reaps establish the normal step (8 microframes at HS); the third
+  // arrives 20 late and must flag. Continuity is judged against the observed
+  // step because usbfs start_frame units are HCD-defined.
   Urb* first = firstOf(transport, /*capture=*/true);
   FakeTransport::fillFull(first);
   transport.complete(first, 1000);
   ASSERT_TRUE(stream.pumpOnce(0));
   Urb* second = firstOf(transport, /*capture=*/true);
   FakeTransport::fillFull(second);
-  transport.complete(second, 1008 + 20);  // a 20-microframe hole
+  transport.complete(second, 1008);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_EQ(stream.captureStats().xruns, 0u);
+  Urb* third = firstOf(transport, /*capture=*/true);
+  FakeTransport::fillFull(third);
+  transport.complete(third, 1008 + 20);  // a 20-microframe hole
   ASSERT_TRUE(stream.pumpOnce(0));
   EXPECT_EQ(stream.captureStats().xruns, 1u);
 }

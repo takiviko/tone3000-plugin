@@ -133,6 +133,12 @@ class UsbAudioStream {
   bool running_ = false;
   int lastCaptureStartFrame_ = -1;
   int lastPlaybackStartFrame_ = -1;
+  // Observed start_frame increment between consecutive URBs of one
+  // direction. usbfs reports start_frame in units the HCD chooses (1 ms
+  // frames on most, microframes on others), so continuity is judged against
+  // the observed step, not an assumed one.
+  int captureStartFrameDelta_ = 0;
+  int playbackStartFrameDelta_ = 0;
   uint64_t lastCaptureNs_ = 0;
 };
 

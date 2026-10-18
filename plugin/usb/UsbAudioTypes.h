@@ -74,6 +74,10 @@ struct StreamStats {
   /** Clock drift of the device relative to nominal, parts per million
       (filled by ClockModel; positive = device runs fast). */
   double driftPpm = 0.0;
+  /** Diagnostics: last URB's start_frame and the observed step between
+      consecutive URBs (HCD-defined units; see UsbAudioStream). */
+  int64_t lastStartFrame = 0;
+  int startFrameStep = 0;
 };
 
 }  // namespace t3k::usb

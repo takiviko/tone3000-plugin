@@ -5,6 +5,7 @@
 // explicit feedback endpoint, capture implicit), 24-bit subslot 3.
 
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -54,8 +55,9 @@ Blob makeUac2Config() {
   // alt1: two endpoints.
   b.add({0x09, 0x04, 0x01, 0x01, 0x02, 0x01, 0x02, 0x20, 0x00});
   b.add({0x07, 0x24, 0x01, 0x02, 0x01, 0x01, 0x00});  // AS general: terminal 2, PCM
-  b.add({0x0C, 0x24, 0x02, 0x01, 0x02, 0x03, 0x18, 0x00, 0x00, 0x00, 0x00,
-         0x00});  // Type I: 2 ch, subslot 3, 24 bit
+  // UAC2 Type I (AMS-22 form, 6 bytes): bFormatType, bSubslotSize,
+  // bBitResolution. No channels field (they live on the terminal).
+  b.add({0x06, 0x24, 0x02, 0x01, 0x03, 0x18});
   b.add({0x09, 0x05, 0x02, 0x05, 0x68, 0x00, 0x01, 0x00, 0x00});  // ep 0x02 isoc async
   b.add({0x07, 0x25, 0x01, 0x00, 0x00, 0x00, 0x00});              // CS endpoint
   b.add({0x09, 0x05, 0x82, 0x11, 0x04, 0x00, 0x04, 0x00, 0x00});  // ep 0x82 feedback
@@ -64,7 +66,7 @@ Blob makeUac2Config() {
   b.add({0x09, 0x04, 0x02, 0x00, 0x00, 0x01, 0x02, 0x20, 0x00});
   b.add({0x09, 0x04, 0x02, 0x01, 0x01, 0x01, 0x02, 0x20, 0x00});
   b.add({0x07, 0x24, 0x01, 0x05, 0x01, 0x01, 0x00});  // AS general: terminal 5
-  b.add({0x0C, 0x24, 0x02, 0x01, 0x02, 0x03, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00});
+  b.add({0x06, 0x24, 0x02, 0x01, 0x03, 0x18});
   b.add({0x09, 0x05, 0x81, 0x05, 0x68, 0x00, 0x01, 0x00, 0x00});  // ep 0x81 isoc data
 
   // Interface 3: MIDIStreaming (bulk). Out of scope; must be ignored.
@@ -147,7 +149,7 @@ TEST(UacDescriptors, Uac2FormatAndEndpoints) {
   ASSERT_TRUE(parseConfig(b.bytes.data(), b.bytes.size(), tree));
   const AltSetting* play = tree.streamingAlts(true)[0];
   EXPECT_EQ(play->altSetting, 1);
-  EXPECT_EQ(play->format.channels, 2);
+  EXPECT_EQ(play->format.channels, 0);  // UAC2: channels live on the terminal
   EXPECT_EQ(play->format.subslotBytes, 3);
   EXPECT_EQ(play->format.bitResolution, 24);
   ASSERT_NE(play->dataEndpoint(), nullptr);
@@ -172,7 +174,8 @@ TEST(UacDescriptors, Uac2FindAltIsRateAgnostic) {
   EXPECT_EQ(tree.findAlt(true, 48000, 2)->altSetting, 1);
   EXPECT_EQ(tree.findAlt(true, 96000, 2)->altSetting, 1);
   EXPECT_EQ(tree.findAlt(false, 44100, 2)->altSetting, 1);
-  EXPECT_EQ(tree.findAlt(false, 48000, 1), nullptr);  // channels do not match
+  // UAC2 formats carry no channel count, so the filter cannot reject on it.
+  EXPECT_EQ(tree.findAlt(false, 48000, 1)->altSetting, 1);
 }
 
 TEST(UacDescriptors, Uac1RatesSelectAltsetting) {
@@ -215,6 +218,61 @@ TEST(UacDescriptors, ParseRateRangesWithSubRangeHeader) {
   ASSERT_EQ(rates.size(), 2u);
   EXPECT_EQ(rates[0], 44100u);
   EXPECT_EQ(rates[1], 48000u);
+}
+
+TEST(UacDescriptors, RealAms22Fixture) {
+  // Captured by the probe's dump mode on the Galaxy Tab S10 FE (plan M1.3).
+  FILE* f = std::fopen(T3K_USB_TEST_FIXTURES_DIR "/ams22-highspeed.bin", "rb");
+  ASSERT_NE(f, nullptr) << "fixture missing; run the probe's dump mode";
+  std::vector<uint8_t> raw(4096);
+  const size_t len = std::fread(raw.data(), 1, raw.size(), f);
+  std::fclose(f);
+  ASSERT_EQ(len, 336u);
+
+  ConfigTree tree;
+  ASSERT_TRUE(parseConfig(raw.data(), len, tree));
+  EXPECT_EQ(tree.uacVersion(), UacVersion::uac2);
+  EXPECT_TRUE(tree.busPowered);
+  EXPECT_EQ(tree.maxPowerMa, 500u);
+
+  // The rate knob: programmable clock source id 40 (0x28) with the SAM_FREQ
+  // control, wired into the terminals as their bCSourceID.
+  const Entity* clock = tree.rateClockSource();
+  ASSERT_NE(clock, nullptr);
+  EXPECT_EQ(clock->id, 40);
+  EXPECT_TRUE(clock->clockFrequencyControl);
+  for (const Entity& e : tree.entities) {
+    if (e.kind == Entity::Kind::inputTerminal || e.kind == Entity::Kind::outputTerminal) {
+      EXPECT_EQ(e.cSourceId, 40) << "terminal " << int(e.id);
+    }
+  }
+
+  // Playback: data 0x02 out plus explicit isoc feedback 0x82; capture: 0x81.
+  const AltSetting* play = tree.streamingAlts(true)[0];
+  EXPECT_EQ(play->interfaceNumber, 1);
+  EXPECT_EQ(play->dataEndpoint()->address, 0x02);
+  ASSERT_NE(tree.feedbackEndpointFor(true), nullptr);
+  EXPECT_EQ(tree.feedbackEndpointFor(true)->address, 0x82);
+  EXPECT_EQ(tree.feedbackEndpointFor(false), nullptr);
+  const AltSetting* cap = tree.streamingAlts(false)[0];
+  EXPECT_EQ(cap->interfaceNumber, 2);
+  EXPECT_EQ(cap->dataEndpoint()->address, 0x81);
+
+  // 24-bit in 4-byte slots (the packing decision plan pitfall 3 warns about).
+  EXPECT_EQ(play->format.subslotBytes, 4);
+  EXPECT_EQ(play->format.bitResolution, 24);
+  EXPECT_EQ(cap->format.subslotBytes, 4);
+  EXPECT_EQ(cap->format.bitResolution, 24);
+
+  // AS general terminal links: playback feeds terminal 2 (USB streaming in),
+  // capture drains terminal 21 (USB streaming out).
+  EXPECT_EQ(play->terminalLink, 2);
+  EXPECT_EQ(cap->terminalLink, 21);
+
+  // The extra AC block (iface 3) and MIDI (iface 4) parse without becoming
+  // streams.
+  EXPECT_EQ(tree.streamingAlts(true).size(), 1u);
+  EXPECT_EQ(tree.streamingAlts(false).size(), 1u);
 }
 
 TEST(UacDescriptors, TruncatedBlobsAreHandled) {

@@ -102,11 +102,18 @@ void UsbAudioStream::preparePlaybackUrb(Urb& urb) {
 
 void UsbAudioStream::handleCapture(Urb& urb) {
   ++captureStats_.urbsReaped;
-  if (lastCaptureStartFrame_ >= 0 &&
-      urb.startFrame != lastCaptureStartFrame_ + options_.packetsPerUrb) {
-    noteXrun(captureStats_);  // start_frame gap: something was missed
+  if (lastCaptureStartFrame_ >= 0) {
+    const int delta = urb.startFrame - lastCaptureStartFrame_;
+    captureStats_.startFrameStep = delta;
+    if (captureStartFrameDelta_ == 0) {
+      captureStartFrameDelta_ = delta;
+    } else if (delta != captureStartFrameDelta_) {
+      noteXrun(captureStats_);  // the frame clock skipped or reordered
+      if (delta > 0) captureStartFrameDelta_ = delta;  // re-anchor after a gap
+    }
   }
   lastCaptureStartFrame_ = urb.startFrame;
+  captureStats_.lastStartFrame = urb.startFrame;
 
   size_t offset = 0;
   int64_t framesInUrb = 0;
@@ -144,11 +151,18 @@ void UsbAudioStream::handleCapture(Urb& urb) {
 
 void UsbAudioStream::handlePlayback(Urb& urb) {
   ++playbackStats_.urbsReaped;
-  if (lastPlaybackStartFrame_ >= 0 &&
-      urb.startFrame != lastPlaybackStartFrame_ + options_.packetsPerUrb) {
-    noteXrun(playbackStats_);
+  if (lastPlaybackStartFrame_ >= 0) {
+    const int delta = urb.startFrame - lastPlaybackStartFrame_;
+    playbackStats_.startFrameStep = delta;
+    if (playbackStartFrameDelta_ == 0) {
+      playbackStartFrameDelta_ = delta;
+    } else if (delta != playbackStartFrameDelta_) {
+      noteXrun(playbackStats_);
+      if (delta > 0) playbackStartFrameDelta_ = delta;
+    }
   }
   lastPlaybackStartFrame_ = urb.startFrame;
+  playbackStats_.lastStartFrame = urb.startFrame;
 
   for (int p = 0; p < options_.packetsPerUrb; ++p) {
     ++playbackStats_.packets;

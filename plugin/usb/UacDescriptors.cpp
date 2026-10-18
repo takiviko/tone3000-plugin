@@ -122,6 +122,7 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
   int curAlt = -1;
   uint8_t curClass = 0, curSubClass = 0, curProtocol = 0;
   AltSetting* cur = nullptr;
+  bool uac2Entities = true;  // set by the AC header's bcdADC
 
   size_t pos = 0;
   while (pos + 2 <= len) {
@@ -175,8 +176,9 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
           ent.bSubtype = d[2];
           switch (d[2]) {
             case kCsAcHeader: {
-              // bcdADC tells UAC1 (1.xx) from UAC2 (2.xx); everything after
-              // is parsed defensively because the layouts differ.
+              // bcdADC tells UAC1 (1.xx) from UAC2 (2.xx); the entity layouts
+              // below branch on it. The header itself is not an entity.
+              if (bLength >= 5) uac2Entities = d[4] >= 2;
               break;
             }
             case kCsInputTerminal:
@@ -184,6 +186,9 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
                 ent.kind = Entity::Kind::inputTerminal;
                 ent.id = d[3];
                 ent.terminalType = le16(d + 4);
+                // UAC2 Input Terminal (17 bytes): id, type, assoc, bCSourceID,
+                // channels, ... The clock source lives at offset 7.
+                if (uac2Entities && bLength >= 8) ent.cSourceId = d[7];
               }
               break;
             case kCsOutputTerminal:
@@ -191,8 +196,10 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
                 ent.kind = Entity::Kind::outputTerminal;
                 ent.id = d[3];
                 ent.terminalType = le16(d + 4);
-                // bSourceID: UAC1 offset 7, UAC2 offset 7 (after bAssocTerminal).
-                ent.sourceId = (bLength >= 8) ? d[7] : 0;
+                // bSourceID: offset 7 in both UAC1 and UAC2. UAC2 adds
+                // bCSourceID at offset 8 (the 12-byte form).
+                ent.sourceId = d[7];
+                if (uac2Entities && bLength >= 9) ent.cSourceId = d[8];
               }
               break;
             case kCsFeatureUnit:
@@ -226,7 +233,11 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
               if (bLength >= 4) ent.id = d[3];
               break;
           }
-          if (ent.kind != Entity::Kind::other || bLength >= 4) out.entities.push_back(ent);
+          // The AC header is bookkeeping, not an entity.
+          if (ent.bSubtype != kCsAcHeader &&
+              (ent.kind != Entity::Kind::other || bLength >= 4)) {
+            out.entities.push_back(ent);
+          }
         } else if (cur->isAudioStreaming()) {
           switch (d[2]) {
             case kCsAsGeneral:
@@ -236,16 +247,22 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
               }
               break;
             case kCsFormatType:
-              if (bLength >= 8 && d[3] == 0x01) {  // FORMAT_TYPE_I
+              if (bLength >= 6 && d[3] == 0x01) {  // FORMAT_TYPE_I
                 FormatInfo& f = cur->format;
                 f.present = true;
-                f.channels = d[4];
-                f.subslotBytes = d[5];
-                f.bitResolution = d[6];
-                // UAC1 Type I continues with bSamFreqType + 3-byte rates at
-                // offset 8. UAC2 Type I has a 4-byte bmChannelConfig and no
-                // rate list (rates live on the clock source control).
+                // UAC2 Type I: bFormatType, bSubslotSize, bBitResolution
+                // (the AMS-22 emits exactly these 6 bytes; a longer form adds
+                // bmChannelConfig/iChannelNames after them). UAC1 Type I has
+                // bNrChannels first and 3-byte rates after bSamFreqType.
                 const bool uac2 = cur->ifaceProtocol == 0x20;
+                if (uac2) {
+                  f.subslotBytes = d[4];
+                  f.bitResolution = d[5];
+                } else if (bLength >= 8) {
+                  f.channels = d[4];
+                  f.subslotBytes = d[5];
+                  f.bitResolution = d[6];
+                }
                 if (!uac2 && bLength >= 10) {
                   const uint8_t freqType = d[7];
                   if (freqType == 0) {
@@ -326,9 +343,9 @@ std::string ConfigTree::describe() const {
     }
     std::snprintf(line, sizeof(line),
                   "  entity id=%u %-15s subtype=0x%02x terminalType=0x%04x source=%u "
-                  "clockType=%u freqControl=%d pins=%zu\n",
-                  e.id, kind, e.bSubtype, e.terminalType, e.sourceId, e.clockType,
-                  e.clockFrequencyControl ? 1 : 0, e.pins.size());
+                  "clock=%u clockType=%u freqControl=%d pins=%zu\n",
+                  e.id, kind, e.bSubtype, e.terminalType, e.sourceId, e.cSourceId,
+                  e.clockType, e.clockFrequencyControl ? 1 : 0, e.pins.size());
     s += line;
   }
 

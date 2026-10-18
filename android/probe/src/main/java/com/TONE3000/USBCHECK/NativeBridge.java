@@ -51,6 +51,10 @@ public final class NativeBridge {
                                               int rate, int channels, int subslot,
                                               int packetsPerUrb, int urbsInFlight);
 
+    /** Capture-ring size in frames (the pacer targets half of it; a direct
+        latency term). Call before starting a stream or RTL run. */
+    public static native void nativeConfigureRing(int frames);
+
     /** One-line counter snapshot for the adb scenario driver. */
     public static native String nativeStatus();
 

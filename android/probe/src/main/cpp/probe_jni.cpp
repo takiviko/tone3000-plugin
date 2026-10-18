@@ -244,6 +244,12 @@ struct Session {
 
 Session g_session;
 
+// Capture-ring size in frames. The pacer holds half of it as its target
+// fill, so this is a direct latency term: 512 frames is 10.7 ms of ring,
+// 5.3 ms of which the pacer deliberately keeps. M2.4 tunes it; the probe
+// can change it per run (nativeConfigureRing).
+int g_ringFrames = 512;
+
 // The stream callback: a sine for stream mode, and (rtl mode) the probe burst
 // once per trial with the input captured into a log for correlation.
 struct ProbeCallback : t3k::usb::UsbAudioStream::Callback {
@@ -336,9 +342,18 @@ StreamConfig configFrom(int rate, int channels, int subslot, const uint8_t* raw,
 void pumpThreadMain() {
   auto lastLog = std::chrono::steady_clock::now();
   while (!g_session.stopRequested.load()) {
-    if (!g_session.stream->pumpOnce(50)) {
-      if (!g_session.stream->running()) break;  // device gone: exit cleanly
-      continue;
+    // Drain every ready completion before sleeping. Reaping one URB per
+    // 100 us tick let capture completions crowd out playback (measured
+    // 991 vs 978 URBs/s screen-off), which slowly overran the small ring.
+    bool progressed = false;
+    for (int i = 0; i < 16 && !g_session.stopRequested.load(); ++i) {
+      if (!g_session.stream->pumpOnce(0)) break;
+      progressed = true;
+    }
+    if (!progressed) {
+      if (!g_session.stream->pumpOnce(50) && !g_session.stream->running()) {
+        break;  // device gone: exit cleanly
+      }
     }
     const auto now = std::chrono::steady_clock::now();
     if (now - lastLog > std::chrono::seconds(5)) {
@@ -430,6 +445,7 @@ std::string startStreamLocked(const StreamConfig& cfg, int packetsPerUrb,
   t3k::usb::UsbAudioStream::Options opts;
   opts.packetsPerUrb = packetsPerUrb;
   opts.urbsInFlight = urbsInFlight;
+  opts.ringFrames = static_cast<size_t>(g_ringFrames);
   opts.nowNs = [] {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -723,6 +739,11 @@ Java_com_TONE3000_USBCHECK_NativeBridge_nativeSetRate(
   const std::string result =
       changeRate(fd, requested, rate, packetsPerUrb, urbsInFlight);
   return env->NewStringUTF(result.c_str());
+}
+
+JNIEXPORT void JNICALL
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeConfigureRing(JNIEnv*, jclass, jint frames) {
+  g_ringFrames = std::max(64, std::min(frames, 4096));
 }
 
 JNIEXPORT jstring JNICALL

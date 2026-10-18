@@ -42,6 +42,7 @@ public final class MainActivity extends Activity implements ProbeService.Listene
     private int pendingRate = 48000;
     private int pendingPackets = 2;
     private int pendingUrbs = 3;
+    private int pendingRing = 512;
     private boolean receiverRegistered;
 
     private final ServiceConnection connection = new ServiceConnection() {
@@ -68,7 +69,7 @@ public final class MainActivity extends Activity implements ProbeService.Listene
             log("usb: permission " + (granted ? "granted" : "denied"));
             if (granted && pendingMode != null) {
                 ProbeService.sendMode(MainActivity.this, pendingMode, pendingRate,
-                        pendingPackets, pendingUrbs);
+                        pendingPackets, pendingUrbs, pendingRing);
                 pendingMode = null;
             }
         }
@@ -150,26 +151,28 @@ public final class MainActivity extends Activity implements ProbeService.Listene
         int rate = intent.getIntExtra("rate", 48000);
         int packets = intent.getIntExtra("packets", 2);
         int urbs = intent.getIntExtra("urbs", 3);
+        int ring = intent.getIntExtra("ring", 512);
         log("mode: " + mode + " (from intent)");
-        dispatch(mode, rate, packets, urbs);
+        dispatch(mode, rate, packets, urbs, ring);
     }
 
     /** Owns the permission prompt; the service is only told about the mode
         once the grant exists. */
-    private void dispatch(String mode, int rate, int packets, int urbs) {
+    private void dispatch(String mode, int rate, int packets, int urbs, int ring) {
         UsbDevice device = findAudioDevice();
         if (device == null) {
             log("usb: no USB Audio device attached");
             return;
         }
         if (usbManager.hasPermission(device)) {
-            ProbeService.sendMode(this, mode, rate, packets, urbs);
+            ProbeService.sendMode(this, mode, rate, packets, urbs, ring);
             return;
         }
         pendingMode = mode;
         pendingRate = rate;
         pendingPackets = packets;
         pendingUrbs = urbs;
+        pendingRing = ring;
         log("usb: requesting permission for " + device.getProductName());
         Intent reply = new Intent(ACTION_PERMISSION);
         reply.setPackage(getPackageName());
@@ -193,14 +196,14 @@ public final class MainActivity extends Activity implements ProbeService.Listene
     private Button modeButton(final String mode, String label) {
         Button b = new Button(this);
         b.setText(label);
-        b.setOnClickListener(v -> dispatch(mode, 48000, 2, 3));
+        b.setOnClickListener(v -> dispatch(mode, 48000, 8, 3, 192));
         return b;
     }
 
     private Button rateButton(final int rate, String label) {
         Button b = new Button(this);
         b.setText(label);
-        b.setOnClickListener(v -> dispatch("rate", rate, 2, 3));
+        b.setOnClickListener(v -> dispatch("rate", rate, 8, 3, 192));
         return b;
     }
 

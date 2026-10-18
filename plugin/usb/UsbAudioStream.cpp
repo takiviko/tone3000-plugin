@@ -426,7 +426,9 @@ bool UsbAudioStream::pumpOnce(int timeoutMs) {
       running_ = false;  // unplug during operation: quiesce (plan pitfall 4)
       return false;
     }
-    if (running_) noteXrun(captureStats_);  // late reap: deadlines slipped
+    // A zero timeout is a non-blocking probe used to drain ready completions;
+    // only a real wait that expires late counts as an xrun.
+    if (running_ && timeoutMs > 0) noteXrun(captureStats_);  // late reap
     return false;
   }
   urb->inFlight = false;

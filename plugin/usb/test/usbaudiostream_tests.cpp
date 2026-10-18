@@ -428,8 +428,19 @@ TEST(UsbAudioStream, LateReapTimeoutCountsXrun) {
   RecordingCallback cb;
   UsbAudioStream stream(testConfig(), {}, transport, cb);
   ASSERT_TRUE(stream.start());
-  EXPECT_FALSE(stream.pumpOnce(0));  // nothing completed in time
+  EXPECT_FALSE(stream.pumpOnce(50));  // nothing completed in time
   EXPECT_EQ(stream.captureStats().xruns, 1u);
+}
+
+TEST(UsbAudioStream, NonBlockingProbeDoesNotCountXrun) {
+  // pumpOnce(0) is the drain loop's probe: no completion is normal, not a
+  // late reap.
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+  EXPECT_FALSE(stream.pumpOnce(0));
+  EXPECT_EQ(stream.captureStats().xruns, 0u);
 }
 
 TEST(UsbAudioStream, StartsFeedbackUrbsWhenExplicitEndpointExists) {

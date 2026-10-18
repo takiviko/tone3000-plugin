@@ -77,15 +77,22 @@ public final class ProbeService extends Service implements UsbShell.Listener {
     private int pendingRate = 48000;
     private int pendingPackets = 2;
     private int pendingUrbs = 3;
+    private int pendingRing = 512;
 
     /** Queue a command for the service; safe from the activity or adb. */
     public static void sendMode(Context context, String mode, int rate, int packets, int urbs) {
+        sendMode(context, mode, rate, packets, urbs, 512);
+    }
+
+    public static void sendMode(Context context, String mode, int rate, int packets, int urbs,
+                                int ring) {
         Intent intent = new Intent(context, ProbeService.class)
                 .setAction(ACTION_MODE)
                 .putExtra("mode", mode)
                 .putExtra("rate", rate)
                 .putExtra("packets", packets)
-                .putExtra("urbs", urbs);
+                .putExtra("urbs", urbs)
+                .putExtra("ring", ring);
         context.startService(intent);
     }
 
@@ -110,7 +117,8 @@ public final class ProbeService extends Service implements UsbShell.Listener {
                 final int rate = intent.getIntExtra("rate", 48000);
                 final int packets = intent.getIntExtra("packets", 2);
                 final int urbs = intent.getIntExtra("urbs", 3);
-                worker.execute(() -> runMode(mode, rate, packets, urbs));
+                final int ring = intent.getIntExtra("ring", 512);
+                worker.execute(() -> runMode(mode, rate, packets, urbs, ring));
             }
         }
         return START_NOT_STICKY;
@@ -143,12 +151,13 @@ public final class ProbeService extends Service implements UsbShell.Listener {
 
     // --- command dispatch (worker thread) ---------------------------------
 
-    private void runMode(String mode, int rate, int packets, int urbs) {
+    private void runMode(String mode, int rate, int packets, int urbs, int ring) {
         if (!"stop".equals(mode) && !"status".equals(mode) && shell.getActiveDevice() == null) {
             pendingMode = mode;
             pendingRate = rate;
             pendingPackets = packets;
             pendingUrbs = urbs;
+            pendingRing = ring;
             log("probe: " + mode + " waiting for the USB device");
             // Permission is the activity's job: the system dismisses the
             // prompt when it comes from a service.
@@ -157,10 +166,10 @@ public final class ProbeService extends Service implements UsbShell.Listener {
         }
         switch (mode) {
             case "stream":
-                startStream(rate, packets, urbs);
+                startStream(rate, packets, urbs, ring);
                 break;
             case "rate":
-                switchRate(rate, packets, urbs);
+                switchRate(rate, packets, urbs, ring);
                 break;
             case "status":
                 log(NativeBridge.nativeStatus());
@@ -172,10 +181,10 @@ public final class ProbeService extends Service implements UsbShell.Listener {
                 runDump();
                 break;
             case "rtl":
-                runRtl(rate, packets, urbs);
+                runRtl(rate, packets, urbs, ring);
                 break;
             case "sweep":
-                runSweep(rate);
+                runSweep(rate, ring);
                 break;
             case "stop":
                 stopStream();
@@ -186,12 +195,13 @@ public final class ProbeService extends Service implements UsbShell.Listener {
         }
     }
 
-    private void startStream(int rate, int packets, int urbs) {
+    private void startStream(int rate, int packets, int urbs, int ring) {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
         // Idempotent: "stream" also switches layouts, so stop any current
         // stream before opening the new one (returns "not running" if idle).
         NativeBridge.nativeStop();
+        NativeBridge.nativeConfigureRing(ring);
         String err = NativeBridge.nativeStart(
                 activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
                 rate, 2, 3, packets, urbs);
@@ -199,15 +209,17 @@ public final class ProbeService extends Service implements UsbShell.Listener {
         if (streaming) {
             ensureForeground();  // USB permission is held at this point
             if (!wakeLock.isHeld()) wakeLock.acquire();
-            log("stream: running " + rate + " Hz/2ch layout=" + packets + "x" + urbs);
+            log("stream: running " + rate + " Hz/2ch layout=" + packets + "x" + urbs
+                    + " ring=" + ring);
         } else {
             log("stream: " + err);
         }
     }
 
-    private void switchRate(int rate, int packets, int urbs) {
+    private void switchRate(int rate, int packets, int urbs, int ring) {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
+        NativeBridge.nativeConfigureRing(ring);
         String result = NativeBridge.nativeSetRate(
                 activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
                 rate, 2, 3, packets, urbs);
@@ -240,9 +252,13 @@ public final class ProbeService extends Service implements UsbShell.Listener {
         for (String line : tree.split("\n")) log(line);
     }
 
-    private void runRtl(int rate, int packets, int urbs) {
+    private void runRtl(int rate, int packets, int urbs, int ring) {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
+        // RTL runs its own stream; a running stream would win "already
+        // running" and the burst would go through the wrong callback mode.
+        NativeBridge.nativeStop();
+        NativeBridge.nativeConfigureRing(ring);
         String rows = NativeBridge.nativeRtl(
                 activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
                 rate, 2, 3, packets, urbs, 5);
@@ -250,9 +266,10 @@ public final class ProbeService extends Service implements UsbShell.Listener {
         for (String line : rows.split("\n")) log(line);
     }
 
-    private void runSweep(int rate) {
+    private void runSweep(int rate, int ring) {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
+        NativeBridge.nativeConfigureRing(ring);
         String rows = NativeBridge.nativeSweep(
                 activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
                 rate, 2, 3);
@@ -286,8 +303,9 @@ public final class ProbeService extends Service implements UsbShell.Listener {
             final int rate = pendingRate;
             final int packets = pendingPackets;
             final int urbs = pendingUrbs;
+            final int ring = pendingRing;
             pendingMode = null;
-            worker.execute(() -> runMode(mode, rate, packets, urbs));
+            worker.execute(() -> runMode(mode, rate, packets, urbs, ring));
         }
     }
 

@@ -341,6 +341,10 @@ RTL**. Full evidence: `plugin/docs/usb-audio/`.
 need fractional microframe packets and are not exposed (the app is pinned at
 48 kHz); the AMS-22 does not answer the UAC2 GET_CUR rate readback, so the
 set rate is verified through feedback and cadence; UAC1 is host-tested only.
+The first on-device switch can freeze while claiming the interfaces if Oboe
+still holds the AMS-22; `plugin/docs/usb-audio/m3-report.md` records the
+state and the workaround. Do not treat USB Direct as production-ready until
+that switch and the L2 e2e number are verified on the tablet.
 
 ## Known gaps
 

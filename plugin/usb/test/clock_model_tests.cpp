@@ -86,10 +86,52 @@ TEST(ClockModel, RegulationHoldsTheRingThroughA500ppmDrift) {
 }
 
 TEST(ClockModel, ParsesFeedbackFormats) {
-  // raw 0x000C0000: 12.0 in 16.16, 48.0 in 10.14.
-  const uint8_t raw[4] = {0x00, 0x00, 0x0C, 0x00};
-  EXPECT_DOUBLE_EQ(ClockModel::parseFeedback(raw, /*format16_16=*/true), 12.0);
-  EXPECT_DOUBLE_EQ(ClockModel::parseFeedback(raw, /*format16_16=*/false), 48.0);
+  // UAC2 16.16, 4 bytes: 0x000C0000 = 12.0.
+  const uint8_t raw16[4] = {0x00, 0x00, 0x0C, 0x00};
+  EXPECT_DOUBLE_EQ(ClockModel::parseFeedback(raw16, /*format16_16=*/true), 12.0);
+  // UAC1 10.14, 3 bytes: 48.0 = 48 * 16384 = 0x0C0000.
+  const uint8_t raw14[3] = {0x00, 0x00, 0x0C};
+  EXPECT_DOUBLE_EQ(ClockModel::parseFeedback(raw14, /*format16_16=*/false), 48.0);
+}
+
+TEST(ClockModel, FeedbackDrivesDriftAndFeedforwardPacing) {
+  ClockModel model(48000.0);
+  model.setFeedback(6.003, 6);  // +500 ppm at 48 kHz high speed
+  EXPECT_TRUE(model.hasFeedback());
+  EXPECT_NEAR(model.driftPpm(), 500.0, 1.0);
+  EXPECT_NEAR(model.measuredRate(), 48024.0, 1.0);
+
+  // A 48-frame URB at +500 ppm is 48.024 frames on average: fractional
+  // frames must carry across packets, not round away.
+  const int nominal = 48;
+  long long total = 0;
+  const int n = 10000;
+  for (int i = 0; i < n; ++i) {
+    total += model.playbackFramesPerPacket(
+        nominal, /*fillFrames=*/256, /*targetFillFrames=*/256);
+  }
+  EXPECT_NEAR(static_cast<double>(total) / n, 48.024, 0.01);
+}
+
+TEST(ClockModel, RejectsImplausibleFeedback) {
+  ClockModel model(48000.0);
+  model.setFeedback(0.0, 6);    // stalled endpoint
+  EXPECT_FALSE(model.hasFeedback());
+  model.setFeedback(1000.0, 6);  // garbled packet
+  EXPECT_FALSE(model.hasFeedback());
+  model.setFeedback(6.0, 0);     // bad nominal
+  EXPECT_FALSE(model.hasFeedback());
+}
+
+TEST(ClockModel, ClearFeedbackFallsBackToCaptureEstimate) {
+  ClockModel model(48000.0);
+  feedSeconds(model, 48000.0 * (1.0 + 20e-6), 10);
+  model.setFeedback(6.0 * (1.0 - 100e-6), 6);
+  EXPECT_NEAR(model.driftPpm(), -100.0, 1.0);
+  model.clearFeedback();
+  EXPECT_FALSE(model.hasFeedback());
+  // The capture window was still accumulating while feedback was live.
+  EXPECT_NEAR(model.driftPpm(), 20.0, 2.0);
 }
 
 }  // namespace

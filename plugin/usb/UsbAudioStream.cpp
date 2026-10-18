@@ -58,6 +58,18 @@ void UsbAudioStream::prepareCaptureUrb(Urb& urb) {
   urb.buffer.assign(packetMax * options_.packetsPerUrb, 0);
 }
 
+void UsbAudioStream::prepareFeedbackUrb(Urb& urb) {
+  urb.isCapture = true;   // IN direction
+  urb.isFeedback = true;
+  urb.endpoint = config_.feedbackEndpoint;
+  urb.packetLengths.assign(options_.packetsPerUrb,
+                           std::max<uint8_t>(config_.feedbackBytes, 1));
+  urb.packetActual.assign(options_.packetsPerUrb, 0);
+  urb.packetStatus.assign(options_.packetsPerUrb, 0);
+  urb.buffer.assign(static_cast<size_t>(urb.packetLengths[0]) * options_.packetsPerUrb,
+                    0);
+}
+
 void UsbAudioStream::preparePlaybackUrb(Urb& urb) {
   urb.isCapture = false;
   urb.endpoint = config_.playbackEndpoint;
@@ -137,16 +149,58 @@ void UsbAudioStream::handleCapture(Urb& urb) {
     offset += urb.packetLengths[p];
   }
 
-  // Drift from observed capture progress (plan section 6.4).
+  // Drift: explicit feedback wins when present; otherwise observed capture
+  // progress (plan section 6.4). Feedback stops arriving if the endpoint
+  // stalls, so expire it and fall back rather than pacing on a stale value.
   if (options_.nowNs) {
     const uint64_t now = options_.nowNs();
     if (lastCaptureNs_ != 0 && now > lastCaptureNs_ && framesInUrb > 0) {
       clock_.addCaptureFrames(framesInUrb, now - lastCaptureNs_);
     }
     lastCaptureNs_ = now;
-    captureStats_.driftPpm = clock_.driftPpm();
-    playbackStats_.driftPpm = clock_.driftPpm();
+    if (clock_.hasFeedback() && lastFeedbackNs_ != 0 &&
+        now > lastFeedbackNs_ && now - lastFeedbackNs_ > 2ull * 1000 * 1000 * 1000) {
+      clock_.clearFeedback();
+    }
   }
+  updateDriftStats();
+}
+
+void UsbAudioStream::updateDriftStats() {
+  const double ppm = clock_.driftPpm();
+  captureStats_.driftPpm = ppm;
+  playbackStats_.driftPpm = ppm;
+  feedbackStats_.driftPpm = ppm;
+}
+
+void UsbAudioStream::handleFeedback(Urb& urb) {
+  ++feedbackStats_.urbsReaped;
+  const size_t fbBytes = std::max<uint8_t>(config_.feedbackBytes, 1);
+  size_t offset = 0;
+  const uint8_t* lastValid = nullptr;
+
+  for (int p = 0; p < options_.packetsPerUrb; ++p) {
+    ++feedbackStats_.packets;
+    const uint32_t actual = urb.packetActual[p];
+    if (urb.packetStatus[p] != 0 || actual < fbBytes) {
+      ++feedbackStats_.feedbackErrors;
+    } else {
+      lastValid = urb.buffer.data() + offset;
+      ++feedbackStats_.feedbackPackets;
+    }
+    offset += urb.packetLengths[p];
+  }
+
+  if (lastValid == nullptr) {
+    updateDriftStats();
+    return;  // a URB with no usable packet: keep the previous estimate
+  }
+
+  const double value = ClockModel::parseFeedback(lastValid, config_.feedback16_16);
+  clock_.setFeedback(value, framesPerPacket_);
+  feedbackStats_.feedbackValue = value;
+  if (options_.nowNs) lastFeedbackNs_ = options_.nowNs();
+  updateDriftStats();
 }
 
 void UsbAudioStream::handlePlayback(Urb& urb) {
@@ -175,15 +229,27 @@ void UsbAudioStream::handlePlayback(Urb& urb) {
 
 bool UsbAudioStream::resubmit(Urb& urb) {
   if (!running_) return false;
-  if (urb.isCapture) {
+  if (urb.isFeedback) {
+    prepareFeedbackUrb(urb);
+  } else if (urb.isCapture) {
     prepareCaptureUrb(urb);
   } else {
     preparePlaybackUrb(urb);
   }
   urb.inFlight = true;
-  ++(urb.isCapture ? captureStats_ : playbackStats_).urbsSubmitted;
+  StreamStats& stats =
+      urb.isFeedback ? feedbackStats_ : (urb.isCapture ? captureStats_ : playbackStats_);
+  ++stats.urbsSubmitted;
   if (!transport_.submit(&urb)) {
     urb.inFlight = false;
+    if (urb.isFeedback) {
+      // Pacing falls back to the capture-ring PI; audio must keep running.
+      feedbackEnabled_ = false;
+      ++feedbackStats_.feedbackErrors;
+      clock_.clearFeedback();
+      updateDriftStats();
+      return false;
+    }
     running_ = false;
     return false;
   }
@@ -197,6 +263,9 @@ bool UsbAudioStream::start() {
   lastCaptureStartFrame_ = -1;
   lastPlaybackStartFrame_ = -1;
   lastCaptureNs_ = 0;
+  lastFeedbackNs_ = 0;
+  clock_.clearFeedback();
+  feedbackEnabled_ = config_.feedbackEndpoint != 0;
 
   const int n = std::max(options_.urbsInFlight, 1);
   for (int i = 0; i < n; ++i) {
@@ -208,13 +277,26 @@ bool UsbAudioStream::start() {
       urbs_.push_back(std::make_unique<Urb>());
       preparePlaybackUrb(*urbs_.back());
     }
+    if (feedbackEnabled_) {
+      urbs_.push_back(std::make_unique<Urb>());
+      prepareFeedbackUrb(*urbs_.back());
+    }
   }
   running_ = true;
   for (auto& u : urbs_) {
     u->inFlight = true;
-    ++(u->isCapture ? captureStats_ : playbackStats_).urbsSubmitted;
+    StreamStats& stats =
+        u->isFeedback ? feedbackStats_ : (u->isCapture ? captureStats_ : playbackStats_);
+    ++stats.urbsSubmitted;
     if (!transport_.submit(u.get())) {
       u->inFlight = false;
+      if (u->isFeedback) {
+        // Feedback is an optimization: keep the audio stream alive and let
+        // the capture-ring PI carry pacing.
+        feedbackEnabled_ = false;
+        ++feedbackStats_.feedbackErrors;
+        continue;
+      }
       running_ = false;
       return false;
     }
@@ -252,7 +334,9 @@ bool UsbAudioStream::pumpOnce(int timeoutMs) {
     running_ = false;  // unplug: stop resubmitting (plan pitfall 4)
     return true;
   }
-  if (urb->isCapture) {
+  if (urb->isFeedback) {
+    handleFeedback(*urb);
+  } else if (urb->isCapture) {
     handleCapture(*urb);
   } else {
     handlePlayback(*urb);

@@ -23,11 +23,12 @@
 //      stream as quiescent. Returning to altsetting 0 is the caller's job
 //      (the control path owns SET_INTERFACE).
 //
-// Playback pacing is implicit-feedback style by default (plan section 6.4):
-// a PI controller on the capture ring fill varies the frames per playback
-// URB by +/-1. With an explicit feedback endpoint the shell can feed the
-// device's real rate in via ClockModel::addCaptureFrames semantics or simply
-// leave pacing at nominal.
+// Playback pacing is feedforward from the explicit feedback endpoint when
+// the device has one (plan section 6.4; the AMS-22 reports on 0x82): the
+// device's real rate scales the playback packet size, and a fill controller
+// trims the residual by +/-1 frame. Without an explicit endpoint the shell
+// leaves feedbackEndpoint = 0 and the PI on the capture ring fill supplies
+// the whole correction (implicit feedback).
 
 #include <cstdint>
 #include <functional>
@@ -53,6 +54,9 @@ struct Urb {
   int status = 0;  // URB-level status (0 or -errno)
   bool inFlight = false;
   bool isCapture = true;
+  /** Capture URBs on the explicit feedback endpoint: IN direction, but the
+      payload is a rate value, not audio, and it never touches the ring. */
+  bool isFeedback = false;
 };
 
 class UrbTransport {
@@ -105,6 +109,7 @@ class UsbAudioStream {
   int callbackFrames() const;
   const StreamStats& captureStats() const { return captureStats_; }
   const StreamStats& playbackStats() const { return playbackStats_; }
+  const StreamStats& feedbackStats() const { return feedbackStats_; }
   ClockModel& clock() { return clock_; }
 
   int inFlightCount() const;
@@ -112,10 +117,13 @@ class UsbAudioStream {
  private:
   void prepareCaptureUrb(Urb& urb);
   void preparePlaybackUrb(Urb& urb);
+  void prepareFeedbackUrb(Urb& urb);
   void handleCapture(Urb& urb);
   void handlePlayback(Urb& urb);
+  void handleFeedback(Urb& urb);
   bool resubmit(Urb& urb);
   void noteXrun(StreamStats& stats) { ++stats.xruns; }
+  void updateDriftStats();
 
   StreamConfig config_;
   Options options_;
@@ -134,7 +142,12 @@ class UsbAudioStream {
 
   StreamStats captureStats_;
   StreamStats playbackStats_;
+  StreamStats feedbackStats_;
   bool running_ = false;
+  /** Cleared for the rest of the stream if feedback URBs cannot be used;
+      pacing then falls back to the capture-ring PI. */
+  bool feedbackEnabled_ = false;
+  uint64_t lastFeedbackNs_ = 0;
   int lastCaptureStartFrame_ = -1;
   int lastPlaybackStartFrame_ = -1;
   // Observed start_frame increment between consecutive URBs of one

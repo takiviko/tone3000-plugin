@@ -40,6 +40,11 @@ struct StreamConfig {
   uint8_t captureEndpoint = 0x81;
   /** Explicit feedback endpoint address, or 0 for implicit feedback. */
   uint8_t feedbackEndpoint = 0;
+  /** Explicit feedback format: UAC2 uses 16.16 in 4 bytes, UAC1 uses 10.14
+      in 3 bytes (plan section 6.1/6.4). Only meaningful when
+      feedbackEndpoint != 0. */
+  bool feedback16_16 = true;
+  uint8_t feedbackBytes = 4;
   /** Active altsetting indices (0 = zero bandwidth) and their interfaces.
       The AMS-22 has one AudioStreaming interface per direction, each with
       its own altsetting and terminal link. */
@@ -78,6 +83,11 @@ struct StreamStats {
       consecutive URBs (HCD-defined units; see UsbAudioStream). */
   int64_t lastStartFrame = 0;
   int startFrameStep = 0;
+  /** Explicit feedback endpoint bookkeeping (only filled for the feedback
+      stats; the value is frames per packet cadence, 0 = none yet). */
+  uint64_t feedbackPackets = 0;
+  uint64_t feedbackErrors = 0;
+  double feedbackValue = 0.0;
 };
 
 }  // namespace t3k::usb

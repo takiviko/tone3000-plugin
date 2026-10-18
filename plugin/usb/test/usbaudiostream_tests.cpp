@@ -33,12 +33,14 @@ struct FakeTransport : UrbTransport {
   std::vector<Urb*> completed;
   int discards = 0;
   bool rejectSubmits = false;
+  bool rejectFeedbackSubmits = false;
   bool gone = false;
 
   bool deviceGone() const override { return gone; }
 
   bool submit(Urb* urb) override {
     if (rejectSubmits) return false;
+    if (rejectFeedbackSubmits && urb->isFeedback) return false;
     inFlight.push_back(urb);
     return true;
   }
@@ -101,6 +103,21 @@ Urb* firstOf(FakeTransport& t, bool capture) {
     if (u->isCapture == capture) return u;
   }
   return nullptr;
+}
+
+Urb* firstFeedback(FakeTransport& t) {
+  for (Urb* u : t.inFlight) {
+    if (u->isFeedback) return u;
+  }
+  return nullptr;
+}
+
+StreamConfig feedbackConfig() {
+  StreamConfig cfg = testConfig();
+  cfg.feedbackEndpoint = 0x82;
+  cfg.feedback16_16 = true;
+  cfg.feedbackBytes = 4;
+  return cfg;
 }
 
 TEST(UsbAudioStream, StartSubmitsBothDirections) {
@@ -320,6 +337,94 @@ TEST(UsbAudioStream, LateReapTimeoutCountsXrun) {
   EXPECT_FALSE(stream.pumpOnce(0));  // nothing completed in time
   EXPECT_EQ(stream.captureStats().xruns, 1u);
 }
+
+TEST(UsbAudioStream, StartsFeedbackUrbsWhenExplicitEndpointExists) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(feedbackConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+  EXPECT_EQ(transport.inFlight.size(), 9u);  // 3 capture + 3 playback + 3 feedback
+  Urb* fb = firstFeedback(transport);
+  ASSERT_NE(fb, nullptr);
+  EXPECT_EQ(fb->endpoint, 0x82);
+  EXPECT_EQ(fb->packetLengths.size(), 8u);
+  for (uint32_t len : fb->packetLengths) EXPECT_EQ(len, 4u);
+}
+
+TEST(UsbAudioStream, FeedbackReapDrivesClockAndDriftStats) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(feedbackConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  Urb* fb = firstFeedback(transport);
+  ASSERT_NE(fb, nullptr);
+  // 6.003 frames per microframe in 16.16 = +501 ppm at 48 kHz high speed.
+  const uint32_t raw = 393413;
+  for (int p = 0; p < 8; ++p) {
+    uint8_t* at = fb->buffer.data() + static_cast<size_t>(p) * 4;
+    at[0] = static_cast<uint8_t>(raw & 0xff);
+    at[1] = static_cast<uint8_t>((raw >> 8) & 0xff);
+    at[2] = static_cast<uint8_t>((raw >> 16) & 0xff);
+    at[3] = static_cast<uint8_t>((raw >> 24) & 0xff);
+    fb->packetActual[p] = 4;
+    fb->packetStatus[p] = 0;
+  }
+  transport.complete(fb, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+
+  EXPECT_TRUE(stream.clock().hasFeedback());
+  EXPECT_NEAR(stream.feedbackStats().feedbackValue, 6.003, 1e-4);
+  EXPECT_EQ(stream.feedbackStats().feedbackPackets, 8u);
+  EXPECT_EQ(stream.feedbackStats().feedbackErrors, 0u);
+  EXPECT_NEAR(stream.playbackStats().driftPpm, 501.0, 1.0);
+  EXPECT_NEAR(stream.captureStats().driftPpm, 501.0, 1.0);
+  // The reaped feedback URB went back out.
+  EXPECT_EQ(transport.inFlight.size(), 9u);
+}
+
+TEST(UsbAudioStream, FeedbackSubmitFailureFallsBackInsteadOfStopping) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  transport.rejectFeedbackSubmits = true;
+  UsbAudioStream stream(feedbackConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+  EXPECT_TRUE(stream.running());
+  EXPECT_EQ(transport.inFlight.size(), 6u);  // audio URBs unaffected
+  EXPECT_FALSE(stream.clock().hasFeedback());
+  EXPECT_EQ(stream.feedbackStats().feedbackErrors, 3u);
+}
+
+TEST(UsbAudioStream, FeedbackStallAtRuntimeFallsBackToCaptureEstimate) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(feedbackConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+  Urb* fb = firstFeedback(transport);
+  ASSERT_NE(fb, nullptr);
+  const uint32_t raw = 393216;  // 6.0 in 16.16
+  for (int p = 0; p < 8; ++p) {
+    uint8_t* at = fb->buffer.data() + static_cast<size_t>(p) * 4;
+    at[0] = static_cast<uint8_t>(raw & 0xff);
+    at[1] = static_cast<uint8_t>((raw >> 8) & 0xff);
+    at[2] = static_cast<uint8_t>((raw >> 16) & 0xff);
+    at[3] = static_cast<uint8_t>((raw >> 24) & 0xff);
+    fb->packetActual[p] = 4;
+    fb->packetStatus[p] = 0;
+  }
+  transport.complete(fb, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_TRUE(stream.clock().hasFeedback());
+
+  // The endpoint stops accepting URBs (device quirk): audio keeps running,
+  // pacing reverts to the capture-based estimate.
+  transport.rejectFeedbackSubmits = true;
+  transport.complete(fb, 8);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_TRUE(stream.running());
+  EXPECT_FALSE(stream.clock().hasFeedback());
+}
+
 
 TEST(UsbAudioStream, DriftIsEstimatedFromCaptureProgress) {
   FakeTransport transport;

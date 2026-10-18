@@ -317,6 +317,9 @@ StreamConfig configFrom(int rate, int channels, int subslot, const uint8_t* raw,
       cfg.clockSourceId = clock->id;
     }
   }
+  // UAC2 explicit feedback is 16.16 in 4 bytes; UAC1's is 10.14 in 3.
+  cfg.feedback16_16 = cfg.uac == t3k::usb::UacVersion::uac2;
+  cfg.feedbackBytes = cfg.feedback16_16 ? 4 : 3;
   const t3k::usb::DeviceQuirk* quirk =
       t3k::usb::UsbQuirks::instance().find(static_cast<uint16_t>(vid),
                                            static_cast<uint16_t>(pid));
@@ -386,6 +389,14 @@ std::string openStream(int fd, const StreamConfig& cfg, int packetsPerUrb,
                                        std::max<uint64_t>(play.urbsReaped, 1)),
                   (long long)cap.lastStartFrame, cap.startFrameStep,
                   (long long)play.lastStartFrame, play.startFrameStep);
+        const auto& fb = g_session.stream->feedbackStats();
+        if (g_session.config.feedbackEndpoint != 0) {
+          PROBE_LOG("stream: fbUrb=%llu fbPkts=%llu fbErr=%llu fbVal=%.5f fbDrift=%.1f",
+                    (unsigned long long)fb.urbsReaped,
+                    (unsigned long long)fb.feedbackPackets,
+                    (unsigned long long)fb.feedbackErrors, fb.feedbackValue,
+                    fb.driftPpm);
+        }
       }
     }
   });

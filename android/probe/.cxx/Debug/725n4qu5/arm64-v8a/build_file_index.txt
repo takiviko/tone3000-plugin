@@ -1,2 +1,0 @@
-/home/bdn/repos/tone3k-android/tone3000-plugin/android/probe/src/main/cpp/CMakeLists.txt
-/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb/CMakeLists.txt

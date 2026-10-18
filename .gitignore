@@ -10,7 +10,7 @@ build-ios-device/
 build-android/
 android/local.properties
 android/.gradle/
-android/app/.cxx/
+android/*/.cxx/
 .idea/
 release-build/
 vs-build/

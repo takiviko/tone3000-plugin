@@ -18,6 +18,13 @@ if (NOT MSVC)
     target_compile_options(t3k_probe PRIVATE -Wall -Wextra)
 endif()
 
+if (ANDROID)
+    # 16 KB page alignment (see the same flag on the Standalone target in
+    # plugin/CMakeLists.txt): NDK 27 does not default to it and Android 15+
+    # shows the "isn't 16 KB compatible" dialog at launch without it.
+    target_link_options(t3k_probe PRIVATE "-Wl,-z,max-page-size=16384")
+endif()
+
 target_link_libraries(t3k_probe PRIVATE
     t3k_usb_audio
     log   # __android_log_print

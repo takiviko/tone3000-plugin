@@ -101,9 +101,14 @@ public final class UsbShell {
                 openAndClaim(device);
             } else {
                 listener.onLog("usb: requesting permission for " + deviceName(device));
+                // Targeting U+: a FLAG_MUTABLE PendingIntent must carry an
+                // explicit intent (setPackage), or getBroadcast throws. The
+                // flag itself is required: the system fills in the grant
+                // result as extras.
+                Intent intent = new Intent(ACTION_PERMISSION);
+                intent.setPackage(context.getPackageName());
                 PendingIntent pi = PendingIntent.getBroadcast(
-                        context, 0, new Intent(ACTION_PERMISSION),
-                        PendingIntent.FLAG_MUTABLE);
+                        context, 0, intent, PendingIntent.FLAG_MUTABLE);
                 usbManager.requestPermission(device, pi);
             }
             return device;

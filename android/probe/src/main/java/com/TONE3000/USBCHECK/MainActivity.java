@@ -1,6 +1,7 @@
 package com.TONE3000.USBCHECK;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.os.Bundle;
@@ -67,6 +68,17 @@ public final class MainActivity extends Activity implements UsbShell.Listener {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String mode = intent.getStringExtra("mode");
+        if (mode != null) {
+            log("mode: " + mode + " (from intent)");
+            runMode(mode);
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         NativeBridge.nativeStop();
         shell.stop();
@@ -84,8 +96,10 @@ public final class MainActivity extends Activity implements UsbShell.Listener {
         UsbDevice device = shell.getActiveDevice();
         if (!"stop".equals(mode) && device == null) {
             log("no device yet: enumerating");
-            shell.findAudioDevice();
+            // Set the pending mode first: when permission is already granted,
+            // findAudioDevice() reaches onDeviceReady synchronously.
             pendingMode = mode;
+            shell.findAudioDevice();
             return;
         }
         switch (mode) {

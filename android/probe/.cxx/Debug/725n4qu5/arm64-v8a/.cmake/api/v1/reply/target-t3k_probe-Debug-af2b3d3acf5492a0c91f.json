@@ -11,6 +11,7 @@
 		"commands" : 
 		[
 			"add_library",
+			"target_link_options",
 			"target_link_libraries",
 			"target_compile_options"
 		],
@@ -32,11 +33,17 @@
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 21,
+				"line" : 25,
 				"parent" : 0
 			},
 			{
 				"command" : 2,
+				"file" : 0,
+				"line" : 28,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
 				"file" : 0,
 				"line" : 18,
 				"parent" : 0
@@ -52,11 +59,11 @@
 					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC"
 				},
 				{
-					"backtrace" : 3,
+					"backtrace" : 4,
 					"fragment" : "-Wall"
 				},
 				{
-					"backtrace" : 3,
+					"backtrace" : 4,
 					"fragment" : "-Wextra"
 				}
 			],
@@ -69,7 +76,7 @@
 			"includes" : 
 			[
 				{
-					"backtrace" : 2,
+					"backtrace" : 3,
 					"path" : "/home/bdn/repos/tone3k-android/tone3000-plugin/plugin/usb"
 				}
 			],
@@ -87,7 +94,7 @@
 	"dependencies" : 
 	[
 		{
-			"backtrace" : 2,
+			"backtrace" : 3,
 			"id" : "t3k_usb_audio::@c39f29be36dafeda9a0b"
 		}
 	],
@@ -106,11 +113,16 @@
 			},
 			{
 				"backtrace" : 2,
+				"fragment" : "-Wl,-z,max-page-size=16384",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 3,
 				"fragment" : "t3k_usb_audio_build/libt3k_usb_audio.a",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 2,
+				"backtrace" : 3,
 				"fragment" : "-llog",
 				"role" : "libraries"
 			},

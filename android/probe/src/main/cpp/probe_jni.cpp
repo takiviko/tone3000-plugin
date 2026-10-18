@@ -365,6 +365,16 @@ std::string openStream(int fd, const StreamConfig& cfg, int packetsPerUrb,
                   (unsigned long long)play.urbsReaped, (unsigned long long)play.packets,
                   (unsigned long long)(cap.xruns + play.xruns),
                   (unsigned long long)cap.bytesTransferred, cap.driftPpm);
+        // Packet-level detail for the xrun budget: how far actual lengths
+        // stray from nominal and how big the URB frame steps are.
+        PROBE_LOG("stream: capBytesPerUrb=%llu playBytesPerUrb=%llu sfCap=%lld stepCap=%d "
+                  "sfPlay=%lld stepPlay=%d",
+                  (unsigned long long)(cap.bytesTransferred /
+                                       std::max<uint64_t>(cap.urbsReaped, 1)),
+                  (unsigned long long)(play.bytesTransferred /
+                                       std::max<uint64_t>(play.urbsReaped, 1)),
+                  (long long)cap.lastStartFrame, cap.startFrameStep,
+                  (long long)play.lastStartFrame, play.startFrameStep);
       }
     }
   });

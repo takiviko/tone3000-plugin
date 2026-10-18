@@ -38,27 +38,58 @@ rows.
   (72 B needed) and 48 kHz with room to spare; 125 us packet cadence
   (`interval=1`) = 8 packets per ms at high speed.
 
-## Pending: raw descriptor dump
+## Raw descriptor dump (confirmed, probe `dump` mode)
 
-- UAC2 clock source ID and its bmControls (the rate knob's entity id).
-- Subslot size (3 packed vs 4-with-24-significant) and bBitResolution.
-- The full AC entity graph: input/output terminals, feature unit wiring.
-- The AS Type I format descriptors (channels, per-rate info if any).
-- Altsettings for 44.1 / 48 / 88.2 / 96 kHz: UAC2 usually keeps one active
-  altsetting per direction and switches rate on the clock source, but the
-  Type I descriptor will confirm; `GET_RANGE` on SAM_FREQ_CONTROL lists the
-  supported rates.
+336-byte blob saved as `plugin/usb/test/fixtures/ams22-highspeed.bin`
+(device descriptor 18 B + configuration 318 B). Parsed by UacDescriptors
+and pinned by the `RealAms22Fixture` unit test.
+
+| Fact | Value |
+| --- | --- |
+| UAC2 clock source ID | **40 (0x28)**, programmable clock (bmAttributes 0x03), SAM_FREQ control present (bmControls 0x07) |
+| Terminals' bCSourceID | 40 on all four terminals |
+| Subslot size | **4 bytes** |
+| Bit resolution | **24 bits** |
+| Channels per stream | 2 (from the terminals' bNrChannels; UAC2 Type I carries none) |
+| Rates | not in the format descriptors: query `GET_RANGE` on SAM_FREQ_CONTROL (clock source 40). Expect 44100/48000/88200/96000. |
+| Altsettings | one active altsetting per direction (iface 1 alt 1, iface 2 alt 1); rate switching happens on the clock source, so 44.1/48/88.2/96 all use the same altsettings |
+
+Entity graph:
+
+```
+playback:  USB streaming IT (2)  ->  Speaker OT (20)
+capture:   Terminal IT (3)       ->  USB streaming OT (21)
+both wired to clock source 40
+```
+
+No feature unit: the AMS-22's gain is hardware (its own knobs). The
+UAC2 Type I format descriptors are the minimal 6-byte form
+(`bFormatType, bSubslotSize, bBitResolution`), which is why the parser must
+not assume the UAC1 field order.
 
 ## Kernel driver state before claiming (M1.3 checklist)
 
-`USBDEVFS_GETDRIVER` per interface runs before `claimInterface(force=true)`
-and logs what held each interface (`usb: iface N kernel driver='...'` in
-the probe log). Fill this table from the first dump run:
+`USBDEVFS_GETDRIVER` per interface, before `claimInterface(force=true)`
+(probe log, 2026-10-17):
 
-| Iface | Kernel driver before claim |
-| --- | --- |
-| 0 | pending |
-| 1 | pending |
-| 2 | pending |
-| 3 | pending (leave bound) |
-| 4 | pending (leave bound) |
+| Iface | Kernel driver before claim | Action |
+| --- | --- | --- |
+| 0 | snd-usb-audio | claim (AudioControl) |
+| 1 | snd-usb-audio | claim (playback AS) |
+| 2 | snd-usb-audio | claim (capture AS) |
+| 3 | snd-usb-audio | leave (quirk: extra AC block) |
+| 4 | snd-usb-audio | leave (quirk: MIDI bulk) |
+
+Claiming detaches `snd-usb-audio` from 0/1/2 as expected; the quirk
+registry keeps 3/4 untouched.
+
+## Streaming notes (M1.5)
+
+- 3 URBs x 8 packets runs at exactly 1 ms/URB; capture packets land within
+  the +/-1 frame tolerance (383-384 bytes/URB average at subslot 4).
+- `start_frame` is reported as 0 on every URB by this kernel/HCD, so
+  start_frame continuity is unobservable here; the machine still checks it
+  (against the observed step) for controllers that populate it.
+- Drift from reap timing reads ~-3000 ppm, which is scheduling noise, not
+  the device clock: the real drift number comes from the explicit feedback
+  endpoint 0x82 (ClockModel parseFeedback, wired up in M2).

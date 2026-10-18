@@ -55,7 +55,7 @@ class UsbDirectBridgeClass : public juce::JNIClassBase {
     closeDevice = resolveStaticMethod(env, "closeDevice", "()V");
     isAvailable = resolveStaticMethod(env, "isAvailable", "()Z");
     deviceName = resolveStaticMethod(env, "deviceName", "()Ljava/lang/String;");
-    rawDescriptors = resolveStaticMethod(env, "getRawDescriptors", "[B");
+    rawDescriptors = resolveStaticMethod(env, "getRawDescriptors", "()[B");
   }
 
   jmethodID openDevice = nullptr;

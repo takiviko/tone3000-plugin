@@ -46,6 +46,14 @@ Two complementary rigs (plan section 4):
 - **L1 device self-measurement** (RTL with the AMS-22's digital loopback ON)
   arrives with the probe app at M1; it measures our own buffering only.
 
+**The AMS-22 feeds its input to its output at ~1 ms regardless of its
+direct-monitor and loopback switches** (proven 2026-10-17: the +1.08 ms
+correlation peak survives with the monitoring app force-stopped and both
+switches off). That hardware peak is stronger than the app path and wins a
+naive argmax, so `rtl_pc.py --window-ms 30,300` selects the app-path peak in
+its expected window instead. The same day's baseline at "pretty low" input
+gain picked the app peak only because the hardware feed was attenuated.
+
 Rig gotchas learned the hard way (see `results-baseline-oboe-bypass.txt`
 header): the EVO8's hardware matrix routes only `DAW1/2` to the Main pair in
 hardware; the "headphone" pair routes exist only in `evo-control`'s shadow
@@ -95,6 +103,8 @@ Raw evidence: `results-baseline-oboe-bypass.{txt,csv}`,
 | --- | --- |
 | `results-baseline-oboe-bypass.txt/.csv` | M0 baseline, chain bypassed, PC rig |
 | `results-baseline-oboe-model.txt` | M0 baseline with a NAM model loaded |
+| `results-m1-stream.txt` | M1.5 soak: 14.5 min, zero xruns, detach/replug |
+| `results-m1-rtl.txt` | M1.6 rtl medians + URB layout sweep |
 | `results-baseline-oboe-dumpsys.txt` | audio_flinger / audio_policy / logcat during streaming |
 | `ams22-descriptors.md` | AMS-22 descriptor dump and entity graph (M1.3) |
 | `m1-report.md` | M1 probe spike go/no-go (M1.7) |

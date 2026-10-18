@@ -98,6 +98,12 @@ def main() -> int:
                     help="comma-separated output channel indices to play the burst on "
                          "(default: all; e.g. '2,3' keeps monitors on 0,1 silent)")
     ap.add_argument("--csv", help="append per-trial rows to this file")
+    ap.add_argument("--window-ms", default=None,
+                    help="lo,hi: pick the strongest path peak in this window after the "
+                         "reference instead of the global argmax. Needed because the "
+                         "AMS-22 feeds its input to its output at ~1 ms regardless of "
+                         "its monitor switches; that hardware peak is stronger than "
+                         "the app path and would win the argmax.")
     args = ap.parse_args()
 
     # Accept numeric strings as indices, everything else as a device name.
@@ -133,6 +139,11 @@ def main() -> int:
             out[:, int(ch)] = burst_pad
 
     results = []
+    window = None
+    if args.window_ms:
+        lo, hi = (float(x) for x in args.window_ms.split(","))
+        window = (lo, hi)
+
     for trial in range(args.trials):
         rec = sd.playrec(out, samplerate=args.rate, channels=args.in_channels,
                          blocking=True, device=(args.in_device, args.out_device))
@@ -143,7 +154,20 @@ def main() -> int:
         ref = rec[:n, args.ref_channel]
         path = rec[:n, args.path_channel]
         lag_ref, ratio_ref = find_burst(ref, probe)
-        lag_path, ratio_path = find_burst(path, probe)
+        if window is None:
+            lag_path, ratio_path = find_burst(path, probe)
+        else:
+            # Restrict the search to the window (ms after the reference): the
+            # strongest peak in range is the app path; the ~1 ms hardware
+            # monitor feed and the ref-sized crosstalk stay excluded.
+            lo_lag = lag_ref + int(window[0] * args.rate / 1000.0)
+            hi_lag = lag_ref + int(window[1] * args.rate / 1000.0)
+            lo_lag = max(0, min(lo_lag, len(path) - len(probe)))
+            hi_lag = max(lo_lag, min(hi_lag, len(path) - len(probe)))
+            seg = path[lo_lag:hi_lag + len(probe)]
+            found = find_burst(seg, probe)
+            lag_path = found.lag + lo_lag
+            ratio_path = found.peakRatio
         rtl_ms = (lag_path - lag_ref) / args.rate * 1000.0
         results.append((rtl_ms, min(ratio_ref, ratio_path)))
         ts = time.strftime("%Y-%m-%dT%H:%M:%S")

@@ -1,0 +1,30 @@
+M0 baseline: Oboe path, NAM model loaded (KD-PB-LD-MIX.nam), monitoring live
+date: 2026-10-17T20:26:41-07:00
+host: Samsung Galaxy Tab S10 FE (SM-X520), Android 16
+device under test: Zoom AMS-22 (UAC2), input gain 10/10, output 10/10, direct monitor OFF, digital loopback OFF
+rig: EVO out 1 -> AMS-22 IN 1 (good cable); AMS-22 MAIN R -> EVO in 2; EVO out 2 -> EVO in 1 (reference)
+note: original source cable found dead today; swapped per the bisect
+---
+[  1/20] rtl=   1.062 ms  peakRatio ref=336.19 path=  4.16
+[  2/20] rtl=   1.125 ms  peakRatio ref=331.13 path=  4.01
+[  3/20] rtl=   1.125 ms  peakRatio ref=335.56 path=  2.84
+[  4/20] rtl=   1.167 ms  peakRatio ref=334.30 path=  2.87
+[  5/20] rtl=   1.104 ms  peakRatio ref=334.31 path=  3.52
+[  6/20] rtl=   0.000 ms  peakRatio ref=330.88 path=  3.61
+[  7/20] rtl=   1.146 ms  peakRatio ref=334.40 path=  4.23
+[  8/20] rtl=   1.125 ms  peakRatio ref=336.07 path=  3.22
+[  9/20] rtl=   1.083 ms  peakRatio ref=336.69 path=  2.80
+[ 10/20] rtl=   1.062 ms  peakRatio ref=331.66 path=  3.71
+[ 11/20] rtl=   1.167 ms  peakRatio ref=334.92 path=  2.74
+[ 12/20] rtl=   1.083 ms  peakRatio ref=334.70 path=  3.29
+[ 13/20] rtl=   1.062 ms  peakRatio ref=335.74 path=  3.59
+[ 14/20] rtl=   1.104 ms  peakRatio ref=336.25 path=  2.88
+[ 15/20] rtl=   1.125 ms  peakRatio ref=332.58 path=  4.14
+[ 16/20] rtl=   1.125 ms  peakRatio ref=334.13 path=  4.05
+[ 17/20] rtl=   1.104 ms  peakRatio ref=331.09 path=  3.37
+[ 18/20] rtl=   1.146 ms  peakRatio ref=335.05 path=  3.51
+[ 19/20] rtl=   0.000 ms  peakRatio ref=337.06 path=  3.39
+[ 20/20] rtl=   1.125 ms  peakRatio ref=337.22 path=  3.87
+
+median rtl = 1.125 ms over 20 trials  (min 0.000, max 1.167)
+worst peak/next-lobe ratio = 2.74  [GARBAGE: < 3.0]

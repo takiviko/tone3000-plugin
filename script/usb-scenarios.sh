@@ -39,7 +39,18 @@ if [ -z "${ANDROID_SERIAL:-}" ]; then
     ANDROID_SERIAL=$(adb devices | awk '/\tdevice$/{print $1; exit}')
 fi
 [ -n "$ANDROID_SERIAL" ] || { echo "no adb device (set ANDROID_SERIAL)" >&2; exit 1; }
-adb() { command adb -s "$ANDROID_SERIAL" "$@"; }
+# Every adb call is bounded. A stale Wi-Fi transport used to hang the soak
+# logger forever (the stream itself kept running); a timeout plus one
+# reconnect keeps the CSV going.
+ADB_TIMEOUT=${ADB_TIMEOUT:-30}
+adb() { timeout "$ADB_TIMEOUT" command adb -s "$ANDROID_SERIAL" "$@"; }
+
+reconnect() {
+    adb disconnect "$ANDROID_SERIAL" >/dev/null 2>&1 || true
+    sleep 1
+    adb connect "$ANDROID_SERIAL" >/dev/null 2>&1 || true
+    sleep 2
+}
 
 send_service() {
     adb shell am startservice -n "$PKG/$SVC" "$@" >/dev/null
@@ -50,13 +61,19 @@ send_activity() {
 }
 
 status_line() {
-    send_service -e mode status
-    sleep 0.7
-    for _ in 1 2 3; do
-        line=$(adb shell run-as "$PKG" tail -1 files/probe.log | tr -d '\r')
+    local attempt line
+    for attempt in 1 2 3; do
+        send_service -e mode status >/dev/null 2>&1 || true
+        sleep 0.7
+        line=$(adb shell run-as "$PKG" tail -1 files/probe.log 2>/dev/null | tr -d '\r' || true)
         case "$line" in
             *"status: running="*) echo "$line"; return 0 ;;
         esac
+        if [ "$attempt" = 2 ]; then
+            reconnect || true
+            send_service -e mode status >/dev/null 2>&1 || true
+            sleep 0.7
+        fi
         sleep 0.4
     done
     echo "status: unavailable"
@@ -157,8 +174,13 @@ cmd_soak() {
             wake=$(adb shell 'dumpsys power | grep -m1 mWakefulness=' || true)
             case "$wake" in *Awake*) adb shell input keyevent 26 ;; esac
         fi
-        cur=$(status_line); t1=$(date +%s); dt=$((t1 - t0))
+        cur=$(status_line || true); t1=$(date +%s); dt=$((t1 - t0))
         [ "$dt" -gt 0 ] || dt=1
+        case "$cur" in
+            *"status: running="*) ;;
+            *) echo "$(date -Iseconds) gap: $cur" >> "$RESULTS"
+               t0=$t1; continue ;;
+        esac
         c_cap=$(get_field "$cur" capUrb); c_play=$(get_field "$cur" playUrb)
         c_capk=$(get_field "$cur" capPkts); c_playk=$(get_field "$cur" playPkts)
         c_xr=$(get_field "$cur" xruns); c_over=$(get_field "$cur" ringOver)

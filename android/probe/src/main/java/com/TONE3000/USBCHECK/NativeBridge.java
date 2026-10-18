@@ -55,6 +55,10 @@ public final class NativeBridge {
         latency term). Call before starting a stream or RTL run. */
     public static native void nativeConfigureRing(int frames);
 
+    /** USBDEVFS_RESET: re-enumerate the device so snd-usb-audio can rebind
+        (a session recovery after the probe detached it). */
+    public static native String nativeReset(int fd);
+
     /** One-line counter snapshot for the adb scenario driver. */
     public static native String nativeStatus();
 

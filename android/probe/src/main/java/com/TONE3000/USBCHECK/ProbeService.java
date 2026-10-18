@@ -177,6 +177,12 @@ public final class ProbeService extends Service implements UsbShell.Listener {
             case "discard":
                 log("recovery: " + NativeBridge.nativeDiscardOne());
                 break;
+            case "reset": {
+                final String err = NativeBridge.nativeReset(activeFd);
+                log("reset: " + (err.isEmpty() ? "ok, re-enumerating" : err));
+                shell.close();  // release the now-stale fd; the kernel rebinds
+                break;
+            }
             case "dump":
                 runDump();
                 break;

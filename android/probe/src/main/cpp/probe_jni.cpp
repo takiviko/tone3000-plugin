@@ -747,6 +747,20 @@ Java_com_TONE3000_USBCHECK_NativeBridge_nativeConfigureRing(JNIEnv*, jclass, jin
 }
 
 JNIEXPORT jstring JNICALL
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeReset(JNIEnv* env, jclass, jint fd) {
+  // USBDEVFS_RESET makes the HCD re-enumerate the device. This is how a
+  // session recovers the kernel's snd-usb-audio binding after the probe
+  // detached it (a physical replug does the same thing).
+  if (::ioctl(fd, USBDEVFS_RESET, 0) < 0) {
+    const std::string err = "reset failed: errno=" + std::to_string(errno);
+    PROBE_LOG("%s", err.c_str());
+    return env->NewStringUTF(err.c_str());
+  }
+  PROBE_LOG("reset: device re-enumerating");
+  return env->NewStringUTF("");
+}
+
+JNIEXPORT jstring JNICALL
 Java_com_TONE3000_USBCHECK_NativeBridge_nativeStatus(JNIEnv* env, jclass) {
   return env->NewStringUTF(statusLine().c_str());
 }

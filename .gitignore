@@ -29,3 +29,5 @@ TONE3000-CERTS/
 notes/
 build-ui/
 build-ui-release/
+
+t3k-usb-low-latency.md

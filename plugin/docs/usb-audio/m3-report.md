@@ -40,76 +40,58 @@ kernel 6.6.102-android15) + Zoom AMS-22 behind an Anker 332 hub.
   builds and `ctest` is 77/77 (the CI step added in this change).
 - Host suite: 77/77.
 
-## On-device observations and the blocker
+## On-device observations
 
-The app installs and runs. The USB permission dialog appears and the type
-is registered: the app log records `USB Direct: select ok, current=USB
-Direct`. The Oboe path is live at 1920-frame blocks before the switch.
+The app now opens USB Direct successfully (commit e960468):
 
-**Blocker:** the switch from Oboe to USB Direct can freeze the app while it
-claims the interfaces. This is the plan's known risk (risk table: "App
-freezes when tapping the USB device row in settings"). The app log stops
-before `USB Direct: config ...`, i.e. the freeze is inside the Java
-`claimInterface(force=true)`/`openDevice` sequence (or the message thread's
-1.5 s device-type transition), not in the URB machine. Once the claim has
-detached `snd-usb-audio`, a subsequent app start cannot open Oboe, so the
-standalone holder loops before the settings can select USB Direct again.
-The probe's `USBDEVFS_RESET` recovers the kernel binding (verified twice:
-`ACTION=bind ... DRIVER=snd-usb-audio` for all five interfaces), but it is
-not a fix for the app's startup ordering.
+- `USB Direct: config subslot=4 play=0x2 cap=0x81 fb=0x82 clock=40`
+- `USB Direct: open 48000 Hz, 48-frame blocks, 8x4 URBs, ring 128`
+- `[Processor] prepareToPlay: sampleRate=48000, samplesPerBlock=48`
+- `USB Direct: start`
+- diagnostics over several minutes: `xruns=0 ringOver=0 ringUnder=5`,
+  feedback 6.00000, drift settling within +/-170 ppm. The app input meter
+  sits around -24 dB with the EVO feed, and monitoring is audible.
 
-Contributing factor: the standalone holder opens its default (Oboe) device
-in `StandalonePluginHolder` before `StandaloneAudioSettings` exists, so a
-remembered/marker USB Direct selection can only be applied *after* Oboe has
-the AMS-22 open. The marker path (constructor-time switch) hits this worst;
-the Settings UI path was not yet exercised after a clean boot.
+The earlier startup freeze was not the claim itself: JUCE's
+`addAudioDeviceType()` does not scan the new type, so the marker switch saw
+an empty device list and selected a device-less type; the app then stayed
+on Oboe and, after the failed attempt, could not start Oboe with the
+kernel driver detached. Scanning explicitly after adding, and registering
+the Java bridge/marker before `super.onCreate`, fixes the flow. The first
+switch no longer freezes.
 
-The tablet was rebooted to clear the audio stack, and the reboot dropped the
-wireless-debugging port (the old port refuses, mDNS does not advertise the
-tablet). On-device testing is therefore blocked until wireless debugging is
-re-enabled or the device is replugged. No claim is made that the L2 e2e
-number was measured; it is not in this report.
+## Remaining blocker: the L2 rig, not the app
 
-## Next steps (morning checklist)
+The PC records the EVO8's analog capture at about -68 to -74 dBFS for both
+the reference and the path, even with the EVO input gains up. On this
+machine the EVO is normally reconfigured by
+`evo-control-apply.service` ("Apply evo-control default preset") to a
+2-output/DAW mode when Reaper is not in use; that preset mutes the analog
+inputs in the mixer. Stopping and masking the service, setting input gains
+0/50 dB, and forcing in1/in2 to all mixer outputs did not change the USB
+capture: the capture stream remains in the 2-output/DAW mode. The service
+was restored for normal use.
 
-1. Re-enable Developer options -> Wireless debugging and `adb connect`
-   (the port changes; `adb pair` if the pairing was reset). Or replug the
-   AMS-22 and use wired adb before claiming anything.
-2. Launch the app; confirm it starts on Oboe (the reboot restores
-   `snd-usb-audio`).
-3. Open Settings -> Audio Driver -> **USB Direct**. If the app freezes,
-   force-stop it; use the probe workaround below to leave the kernel driver
-   detached, relaunch (Oboe falls back to the tablet speaker), and switch
-   again:
-   ```sh
-   adb shell am start -n com.TONE3000.USBCHECK/.MainActivity -e mode stream
-   sleep 2
-   adb shell am force-stop com.TONE3000.USBCHECK   # interfaces free, driver stays detached
-   ```
-4. Verify the app log for `USB Direct: config subslot=4 ...`,
-   `USB Direct: open 48000 Hz, 48-frame blocks, 8x4 URBs, ring 128`,
-   `USB Direct: start`, then the 10 s xrun/drift lines.
-5. Run the L2 rig:
-   ```sh
-   /tmp/opencode/venv-audio/bin/python script/rtl_pc.py --trials 20 \
-       --probe sweep --rate 48000 --out-channels 0,1 \
-       --in-device "EVO8 Inputs" --out-device "EVO8 Outputs"
-   ```
-   The default PipeWire source is currently the webcam; pass the EVO8
-   devices explicitly (or set the default source to
-   `alsa_input.usb-Audient_EVO8-00.analog-surround-41` temporarily).
-   The AMS-22 input gain must be usable for the analog path; the rig's
-   reference channel (EVO8 in1) works regardless.
-6. Fill in `results-integration.txt` and the budget table; restore Oboe,
-   then replug the AMS-22 if the kernel driver needs to rebind.
+Consequence: the app path is audible on the EVO's direct monitor, but the
+PC cannot record it at a usable level. **No L2 e2e number is claimed.** The
+measured core number remains the probe's **5.52 ms digital-loop RTL** at
+the shipping layout.
 
-**Likely fix for the freeze:** move the type registration and the
-USB Direct selection to a point before `StandalonePluginHolder` initializes
-its AudioDeviceManager (or make the switch close/stop Oboe and wait for the
-kernel driver to release before claiming). Registering the type from a
-startup hook and passing a preferred USB Direct setup to the holder would
-avoid ever opening Oboe on the AMS-22. Do not merge a "works on my machine"
-claim without the measured e2e number.
+## Next steps
+
+1. Put the EVO8 back into its normal input-capture (Reaper) mode, or stop
+   the service and apply a preset that routes the analog inputs to the USB
+   capture. Verify with a tone that the EVO USB capture is at a healthy
+   level before measuring.
+2. Run the L2 rig (20 trials, bypass chain) and write
+   `results-integration.txt`; pass the EVO devices explicitly if the
+   default PipeWire source is not the EVO:
+   `rtl_pc.py --trials 20 --probe sweep --rate 48000 --out-channels 0,1
+   --in-device "EVO8 Inputs" --out-device "EVO8 Outputs"`.
+3. Complete a clean 60-minute screen-off soak (script is now
+   timeout-hardened).
+4. Keep the EVO service enabled in normal use; only disable it for a
+   measurement if that is what the input-capture mode requires.
 
 ## M2.4 soak caveat
 

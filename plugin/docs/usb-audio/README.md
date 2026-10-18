@@ -134,4 +134,4 @@ Raw evidence: `results-baseline-oboe-bypass.{txt,csv}`,
 
 | Device | USB class | Status |
 | --- | --- | --- |
-| Zoom AMS-22 | UAC2, explicit feedback | driver core complete (M2): 8x4/128, 5.52 ms digital RTL; M3 built, on-device switch + L2 e2e pending (`m3-report.md`) |
+| Zoom AMS-22 | UAC2, explicit feedback | driver core complete (M2): 8x4/128, 5.52 ms digital RTL; USB Direct runs on-device at 48-frame blocks, zero xruns (M3); L2 e2e pending the EVO capture rig (`m3-report.md`) |

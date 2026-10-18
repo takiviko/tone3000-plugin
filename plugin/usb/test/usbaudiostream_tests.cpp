@@ -34,12 +34,20 @@ struct FakeTransport : UrbTransport {
   int discards = 0;
   bool rejectSubmits = false;
   bool rejectFeedbackSubmits = false;
+  bool rejectPlaybackSubmits = false;
   bool gone = false;
+  /** Fail this many submit() calls, then accept again (transient error). */
+  int failNextSubmits = 0;
 
   bool deviceGone() const override { return gone; }
 
   bool submit(Urb* urb) override {
+    if (failNextSubmits > 0) {
+      --failNextSubmits;
+      return false;
+    }
     if (rejectSubmits) return false;
+    if (rejectPlaybackSubmits && !urb->isCapture) return false;
     if (rejectFeedbackSubmits && urb->isFeedback) return false;
     inFlight.push_back(urb);
     return true;
@@ -534,6 +542,119 @@ TEST(UsbAudioStream, DriftIsEstimatedFromCaptureProgress) {
     ASSERT_TRUE(stream.pumpOnce(0));
   }
   EXPECT_NEAR(stream.captureStats().driftPpm, -500.0, 20.0);
+}
+
+// --- M2.3 recovery paths ---------------------------------------------------
+
+UsbAudioStream::Options fastRetryOptions() {
+  UsbAudioStream::Options opts;
+  opts.submitAttempts = 3;
+  opts.submitBackoffMicros = 0;  // keep the host suite instant
+  return opts;
+}
+
+TEST(UsbAudioStream, TransientSubmitFailuresAreRetried) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), fastRetryOptions(), transport, cb);
+  transport.failNextSubmits = 2;  // first capture URB fails twice, then lands
+  ASSERT_TRUE(stream.start());
+  EXPECT_TRUE(stream.running());
+  EXPECT_EQ(transport.inFlight.size(), 6u);
+  EXPECT_EQ(stream.captureStats().submitFailures, 2u);
+  EXPECT_EQ(stream.captureStats().submitRetries, 2u);
+}
+
+TEST(UsbAudioStream, ExhaustedSubmitKeepsStreamRunningAndRequeues) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), fastRetryOptions(), transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  transport.failNextSubmits = 3;  // exhausts one resubmit's budget
+  Urb* urb = firstOf(transport, /*capture=*/true);
+  ASSERT_NE(urb, nullptr);
+  FakeTransport::fillFull(urb);
+  transport.complete(urb, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  // The failed URB is deferred, not dropped: audio keeps running.
+  EXPECT_TRUE(stream.running());
+  EXPECT_EQ(stream.inFlightCount(), 5);
+  EXPECT_EQ(stream.captureStats().submitFailures, 3u);
+  EXPECT_EQ(stream.captureStats().xruns, 1u);
+
+  // The next pump drains the deferred queue before blocking in reap (it
+  // returns false because no reap completed, but the URB is back in flight).
+  stream.pumpOnce(0);
+  EXPECT_TRUE(stream.running());
+  EXPECT_EQ(stream.inFlightCount(), 6);
+}
+
+TEST(UsbAudioStream, SubmitFailureOnGoneDeviceQuiesces) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), fastRetryOptions(), transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  transport.rejectSubmits = true;
+  transport.gone = true;
+  Urb* urb = firstOf(transport, /*capture=*/true);
+  FakeTransport::fillFull(urb);
+  transport.complete(urb, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_FALSE(stream.running());
+  EXPECT_EQ(stream.captureStats().submitFailures, 1u);  // no retry budget burned
+}
+
+TEST(UsbAudioStream, StartFailureDiscardsOutstandingUrbs) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), fastRetryOptions(), transport, cb);
+  // The capture URB lands, the playback one never does: start must unwind
+  // the URBs already handed to the kernel before returning.
+  transport.rejectPlaybackSubmits = true;
+  EXPECT_FALSE(stream.start());
+  EXPECT_FALSE(stream.running());
+  EXPECT_EQ(stream.inFlightCount(), 0);
+  EXPECT_GE(transport.discards, 1);
+  EXPECT_EQ(stream.playbackStats().submitFailures, 3u);
+}
+
+TEST(UsbAudioStream, DiscardedUrbCountsOneXrunAndResubmits) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), fastRetryOptions(), transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  // Simulate a device-side error burst: cancel an in-flight capture URB.
+  // The kernel reaps it with -ECONNRESET; that is one xrun, not eight.
+  ASSERT_EQ(stream.discardOneInFlight(), 1);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_TRUE(stream.running());
+  EXPECT_EQ(stream.captureStats().xruns, 1u);
+  EXPECT_EQ(transport.inFlight.size(), 6u);  // resubmitted after the error
+}
+
+TEST(UsbAudioStream, UrErrorDoesNotTriggerStartFrameXrun) {
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(testConfig(), {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  // Establish a frame step, then deliver an errored URB whose stale
+  // start_frame would otherwise look like a discontinuity.
+  Urb* first = firstOf(transport, /*capture=*/true);
+  FakeTransport::fillFull(first);
+  transport.complete(first, 1000);
+  ASSERT_TRUE(stream.pumpOnce(0));
+
+  Urb* second = firstOf(transport, /*capture=*/true);
+  ASSERT_NE(second, nullptr);
+  second->status = -104;
+  transport.complete(second, 9000);
+  ASSERT_TRUE(stream.pumpOnce(0));
+  EXPECT_EQ(stream.captureStats().xruns, 1u);  // the URB error only
+  EXPECT_TRUE(stream.running());
 }
 
 }  // namespace

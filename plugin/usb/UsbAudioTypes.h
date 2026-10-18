@@ -93,6 +93,12 @@ struct StreamStats {
       Cumulative for the stream. */
   uint64_t ringUnderruns = 0;
   uint64_t ringOverruns = 0;
+  /** Recovery counters (plan M2.3): rejected submit() attempts, and the
+      subset that was retried in place. A transient failure is retried before
+      the machine gives up on that URB; the URB then waits in the deferred
+      queue instead of shortening the pool permanently. */
+  uint64_t submitFailures = 0;
+  uint64_t submitRetries = 0;
 };
 
 }  // namespace t3k::usb

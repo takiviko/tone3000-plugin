@@ -88,6 +88,12 @@ class UsbAudioStream {
     int urbsInFlight = 3;   // plan M1.5 default
     int packetsPerUrb = 8;  // 1 ms per URB at high speed
     size_t ringFrames = 512;
+    /** Bounded retry for a rejected submit() (plan M2.3). A transient usbfs
+        failure must not tear the stream down; only deviceGone() is fatal.
+        Attempts includes the first try; the backoff is per retry and 0 in
+        tests so the host suite stays instant. */
+    int submitAttempts = 3;
+    int submitBackoffMicros = 250;
     /** Monotonic nanoseconds for drift measurement; null disables drift
         tracking (the estimator then reports 0 ppm). */
     std::function<uint64_t()> nowNs;
@@ -114,6 +120,12 @@ class UsbAudioStream {
 
   int inFlightCount() const;
 
+  /** Recovery hook (plan M2.3): cancel one in-flight URB so the next reap
+      takes the error path exactly as a device-side error burst would. The
+      kernel reaps it with -ECONNRESET; the machine counts the xrun and
+      resubmits. Returns the number of URBs cancelled (0 or 1). */
+  int discardOneInFlight();
+
  private:
   void prepareCaptureUrb(Urb& urb);
   void preparePlaybackUrb(Urb& urb);
@@ -122,6 +134,11 @@ class UsbAudioStream {
   void handlePlayback(Urb& urb);
   void handleFeedback(Urb& urb);
   bool resubmit(Urb& urb);
+  /** Bounded submit retry; false only after exhausting attempts or when the
+      transport has seen a fatal device error. */
+  bool submitWithRetry(Urb& urb, StreamStats& stats);
+  /** Retry URBs whose deferred submission failed a previous round. */
+  bool drainRetryQueue();
   void noteXrun(StreamStats& stats) { ++stats.xruns; }
   void updateDriftStats();
 
@@ -135,6 +152,9 @@ class UsbAudioStream {
   size_t targetFill_;
 
   std::vector<std::unique_ptr<Urb>> urbs_;
+  /** URBs whose submit failed transiently; retried on the next pump before
+      blocking in reap. They are not in flight and hold no kernel resources. */
+  std::vector<Urb*> retryQueue_;
   AudioRing captureRing_;
   std::vector<float> inScratch_;
   std::vector<float> outScratch_;

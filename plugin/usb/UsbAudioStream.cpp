@@ -1,7 +1,9 @@
 #include "UsbAudioStream.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 #include "PcmConvert.h"
 
@@ -49,6 +51,7 @@ int UsbAudioStream::inFlightCount() const {
 
 void UsbAudioStream::prepareCaptureUrb(Urb& urb) {
   urb.isCapture = true;
+  urb.status = 0;  // cleared here so a retried URB starts clean
   urb.endpoint = config_.captureEndpoint;
   urb.packetLengths.assign(options_.packetsPerUrb, 0);
   urb.packetActual.assign(options_.packetsPerUrb, 0);
@@ -62,6 +65,7 @@ void UsbAudioStream::prepareCaptureUrb(Urb& urb) {
 
 void UsbAudioStream::prepareFeedbackUrb(Urb& urb) {
   urb.isCapture = true;   // IN direction
+  urb.status = 0;
   urb.isFeedback = true;
   urb.endpoint = config_.feedbackEndpoint;
   urb.packetLengths.assign(options_.packetsPerUrb,
@@ -74,6 +78,7 @@ void UsbAudioStream::prepareFeedbackUrb(Urb& urb) {
 
 void UsbAudioStream::preparePlaybackUrb(Urb& urb) {
   urb.isCapture = false;
+  urb.status = 0;
   urb.endpoint = config_.playbackEndpoint;
   urb.packetLengths.assign(options_.packetsPerUrb, 0);
   urb.packetActual.assign(options_.packetsPerUrb, 0);
@@ -115,7 +120,12 @@ void UsbAudioStream::preparePlaybackUrb(Urb& urb) {
 
 void UsbAudioStream::handleCapture(Urb& urb) {
   ++captureStats_.urbsReaped;
-  if (lastCaptureStartFrame_ >= 0) {
+  // One URB-level error (e.g. -ECONNRESET after DISCARDURB, or a protocol
+  // error) counts as one xrun; the per-packet checks below would otherwise
+  // report the same failure once per packet.
+  const bool urbError = urb.status != 0;
+  if (urbError) noteXrun(captureStats_);
+  if (!urbError && lastCaptureStartFrame_ >= 0) {
     const int delta = urb.startFrame - lastCaptureStartFrame_;
     captureStats_.startFrameStep = delta;
     if (captureStartFrameDelta_ == 0) {
@@ -137,8 +147,8 @@ void UsbAudioStream::handleCapture(Urb& urb) {
     const uint32_t nominal = static_cast<uint32_t>(framesPerPacket_ * bytesPerFrame_);
     const uint32_t actual = urb.packetActual[p];
     const uint32_t tolerance = static_cast<uint32_t>(bytesPerFrame_);
-    if (urb.packetStatus[p] != 0 || actual + tolerance < nominal ||
-        actual > nominal + tolerance) {
+    if (!urbError && (urb.packetStatus[p] != 0 || actual + tolerance < nominal ||
+                      actual > nominal + tolerance)) {
       noteXrun(captureStats_);
     }
     if (actual > 0 && urb.packetStatus[p] == 0) {
@@ -209,7 +219,9 @@ void UsbAudioStream::handleFeedback(Urb& urb) {
 
 void UsbAudioStream::handlePlayback(Urb& urb) {
   ++playbackStats_.urbsReaped;
-  if (lastPlaybackStartFrame_ >= 0) {
+  const bool urbError = urb.status != 0;
+  if (urbError) noteXrun(playbackStats_);
+  if (!urbError && lastPlaybackStartFrame_ >= 0) {
     const int delta = urb.startFrame - lastPlaybackStartFrame_;
     playbackStats_.startFrameStep = delta;
     if (playbackStartFrameDelta_ == 0) {
@@ -226,9 +238,30 @@ void UsbAudioStream::handlePlayback(Urb& urb) {
     ++playbackStats_.packets;
     const uint32_t expected = urb.packetLengths[p];
     const uint32_t actual = urb.packetActual[p];
-    if (urb.packetStatus[p] != 0 || actual != expected) noteXrun(playbackStats_);
+    if (!urbError && (urb.packetStatus[p] != 0 || actual != expected)) {
+      noteXrun(playbackStats_);
+    }
     playbackStats_.bytesTransferred += actual;
   }
+}
+
+bool UsbAudioStream::submitWithRetry(Urb& urb, StreamStats& stats) {
+  const int attempts = std::max(options_.submitAttempts, 1);
+  for (int attempt = 0; attempt < attempts; ++attempt) {
+    if (transport_.submit(&urb)) return true;
+    ++stats.submitFailures;
+    // A dead device is not a transient failure: let the caller quiesce
+    // rather than burn the retry budget on every remaining URB.
+    if (transport_.deviceGone()) return false;
+    if (attempt + 1 < attempts) {
+      ++stats.submitRetries;
+      if (options_.submitBackoffMicros > 0) {
+        std::this_thread::sleep_for(
+            std::chrono::microseconds(options_.submitBackoffMicros));
+      }
+    }
+  }
+  return false;
 }
 
 bool UsbAudioStream::resubmit(Urb& urb) {
@@ -244,7 +277,7 @@ bool UsbAudioStream::resubmit(Urb& urb) {
   StreamStats& stats =
       urb.isFeedback ? feedbackStats_ : (urb.isCapture ? captureStats_ : playbackStats_);
   ++stats.urbsSubmitted;
-  if (!transport_.submit(&urb)) {
+  if (!submitWithRetry(urb, stats)) {
     urb.inFlight = false;
     if (urb.isFeedback) {
       // Pacing falls back to the capture-ring PI; audio must keep running.
@@ -254,15 +287,57 @@ bool UsbAudioStream::resubmit(Urb& urb) {
       updateDriftStats();
       return false;
     }
-    running_ = false;
+    if (transport_.deviceGone()) {
+      running_ = false;  // unplug: quiesce (plan pitfall 4)
+      return false;
+    }
+    // Transient: keep the URB for the next pump instead of shrinking the
+    // pool permanently. The gap is an xrun, not a teardown.
+    noteXrun(stats);
+    retryQueue_.push_back(&urb);
     return false;
   }
   return true;
 }
 
+bool UsbAudioStream::drainRetryQueue() {
+  if (retryQueue_.empty()) return false;
+  std::vector<Urb*> still;
+  still.reserve(retryQueue_.size());
+  bool submittedAny = false;
+  for (Urb* urb : retryQueue_) {
+    if (!running_) break;
+    StreamStats& stats = urb->isFeedback
+                             ? feedbackStats_
+                             : (urb->isCapture ? captureStats_ : playbackStats_);
+    urb->inFlight = true;
+    ++stats.urbsSubmitted;
+    if (submitWithRetry(*urb, stats)) {
+      submittedAny = true;
+      continue;
+    }
+    urb->inFlight = false;
+    if (transport_.deviceGone()) {
+      running_ = false;
+      break;
+    }
+    if (urb->isFeedback) {
+      feedbackEnabled_ = false;
+      ++feedbackStats_.feedbackErrors;
+      clock_.clearFeedback();
+      updateDriftStats();
+      continue;  // feedback is optional: drop it, keep the audio going
+    }
+    still.push_back(urb);
+  }
+  retryQueue_.swap(still);
+  return submittedAny;
+}
+
 bool UsbAudioStream::start() {
   if (running_) return true;
   urbs_.clear();
+  retryQueue_.clear();
   captureRing_.clear();
   lastCaptureStartFrame_ = -1;
   lastPlaybackStartFrame_ = -1;
@@ -292,7 +367,7 @@ bool UsbAudioStream::start() {
     StreamStats& stats =
         u->isFeedback ? feedbackStats_ : (u->isCapture ? captureStats_ : playbackStats_);
     ++stats.urbsSubmitted;
-    if (!transport_.submit(u.get())) {
+    if (!submitWithRetry(*u, stats)) {
       u->inFlight = false;
       if (u->isFeedback) {
         // Feedback is an optimization: keep the audio stream alive and let
@@ -302,6 +377,9 @@ bool UsbAudioStream::start() {
         continue;
       }
       running_ = false;
+      // Discard/reap whatever already went to the kernel before the Urb
+      // objects are freed (the caller resets the stream on failure).
+      stop();
       return false;
     }
   }
@@ -309,8 +387,10 @@ bool UsbAudioStream::start() {
 }
 
 void UsbAudioStream::stop() {
-  if (!running_ && inFlightCount() == 0) return;
+  if (!running_ && inFlightCount() == 0 && retryQueue_.empty()) return;
   running_ = false;
+  // Deferred URBs never reached the kernel; dropping them is enough.
+  retryQueue_.clear();
   for (auto& u : urbs_) {
     if (u->inFlight) transport_.discard(u.get());
   }
@@ -323,7 +403,23 @@ void UsbAudioStream::stop() {
   }
 }
 
+int UsbAudioStream::discardOneInFlight() {
+  for (auto& u : urbs_) {
+    if (u->inFlight) {
+      transport_.discard(u.get());
+      return 1;
+    }
+  }
+  return 0;
+}
+
 bool UsbAudioStream::pumpOnce(int timeoutMs) {
+  // A transient submit failure leaves the URB out of flight; retry it before
+  // blocking in reap, or a persistent-but-recovering condition would spin
+  // the pool down to nothing.
+  if (running_) drainRetryQueue();
+  if (!running_) return false;
+
   Urb* urb = transport_.reap(timeoutMs);
   if (urb == nullptr) {
     if (transport_.deviceGone()) {

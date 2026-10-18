@@ -189,6 +189,9 @@ public final class ProbeService extends Service implements UsbShell.Listener {
     private void startStream(int rate, int packets, int urbs) {
         UsbDevice device = shell.getActiveDevice();
         if (device == null) return;
+        // Idempotent: "stream" also switches layouts, so stop any current
+        // stream before opening the new one (returns "not running" if idle).
+        NativeBridge.nativeStop();
         String err = NativeBridge.nativeStart(
                 activeFd, shell.getRawDescriptors(), device.getVendorId(), device.getProductId(),
                 rate, 2, 3, packets, urbs);
@@ -196,8 +199,7 @@ public final class ProbeService extends Service implements UsbShell.Listener {
         if (streaming) {
             ensureForeground();  // USB permission is held at this point
             if (!wakeLock.isHeld()) wakeLock.acquire();
-            log("stream: running " + rate + " Hz/2ch/subslot 3 layout=" + packets + "x"
-                    + urbs);
+            log("stream: running " + rate + " Hz/2ch layout=" + packets + "x" + urbs);
         } else {
             log("stream: " + err);
         }

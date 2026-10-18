@@ -18,6 +18,15 @@ if (NOT MSVC)
     target_compile_options(t3k_probe PRIVATE -Wall -Wextra)
 endif()
 
+# Gradle's debug variant compiles with -O0. At 8,000 isochronous packets per
+# second, -O0 loses about a third of real time to per-packet work (measured:
+# 5,330 packets/s at 8x2), which reads as a driver cadence failure when it is
+# only a build flag. Keep debug symbols, optimize the hot path.
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(t3k_usb_audio PRIVATE -O3)
+    target_compile_options(t3k_probe PRIVATE -O3)
+endif()
+
 if (ANDROID)
     # 16 KB page alignment (see the same flag on the Standalone target in
     # plugin/CMakeLists.txt): NDK 27 does not default to it and Android 15+

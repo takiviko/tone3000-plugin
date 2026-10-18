@@ -14,6 +14,7 @@
 #include <jni.h>
 
 #include <linux/usbdevice_fs.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -113,8 +114,10 @@ class UsbfsTransport : public UrbTransport {
   }
 
   Urb* reap(int timeoutMs) override {
-    // Non-blocking reap inside a poll window; the machine's pumpOnce maps
-    // onto one completed URB per call.
+    // Non-blocking reap in a short sleep loop. poll() looked cheaper, but on
+    // this usbfs fd POLLOUT is the "submit has room" hint and is always
+    // ready, so poll() spins; POLLIN-only never wakes. The M1/M2 runs used
+    // this loop and sustained 1 ms URBs; keep it, with a finer sleep.
     usbdevfs_urb* k = nullptr;
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeoutMs);
@@ -144,8 +147,7 @@ class UsbfsTransport : public UrbTransport {
         return nullptr;
       }
       if (std::chrono::steady_clock::now() >= deadline) return nullptr;
-      // Short sleep then retry; poll() would also work, the fd is pollable.
-      struct timespec ts = {0, 200 * 1000};
+      struct timespec ts = {0, 100 * 1000};
       nanosleep(&ts, nullptr);
     }
   }

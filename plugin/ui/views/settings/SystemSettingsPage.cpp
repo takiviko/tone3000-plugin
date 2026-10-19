@@ -42,7 +42,9 @@ juce::String bufferCaption(const AudioDeviceState& s) {
 // only reported by backends that estimate it (USB Direct). Empty when the
 // device is closed or has nothing useful to say.
 juce::String diagnosticsCaption(const AudioDeviceState& s) {
-  if (!s.deviceOpen || s.sampleRate <= 0.0) return {};
+  // Android/USB Direct only (plan M3.5): this is the custom driver's honest
+  // readout, not a general desktop feature.
+  if (!s.deviceOpen || s.currentType != "USB Direct" || s.sampleRate <= 0.0) return {};
   const bool hasLatency = s.inputLatencySamples > 0 || s.outputLatencySamples > 0;
   if (!hasLatency && s.xrunCount <= 0 && !s.hasDrift) return {};
   juce::String text;

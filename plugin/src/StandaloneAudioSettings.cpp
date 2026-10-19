@@ -182,7 +182,8 @@ void StandaloneAudioSettings::changeListenerCallback(juce::ChangeBroadcaster*) {
   applyMonitoringPolicy();
   // Plan M3.5: one diagnostics line per state change. Latency is the device's
   // own readback, not the requested setup; drift only exists on backends that
-  // estimate it.
+  // estimate it. Android-only so desktop and iOS behavior is unchanged.
+#if JUCE_ANDROID
   if (auto* dm = deviceManager()) {
     if (auto* device = dm->getCurrentAudioDevice()) {
       juce::String line =
@@ -193,13 +194,12 @@ void StandaloneAudioSettings::changeListenerCallback(juce::ChangeBroadcaster*) {
           juce::String(device->getInputLatencyInSamples()) + " / out " +
           juce::String(device->getOutputLatencyInSamples()) + " samples, xruns " +
           juce::String(device->getXRunCount());
-#if JUCE_ANDROID
       if (auto* diag = dynamic_cast<t3k::AudioDeviceDiagnostics*>(device))
         line << ", drift " << juce::String(diag->getDriftPpm(), 1) << " ppm";
-#endif
       juce::Logger::writeToLog(line);
     }
   }
+#endif
   if (onDeviceStateChanged)
     onDeviceStateChanged();
 }

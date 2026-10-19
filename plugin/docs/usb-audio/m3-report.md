@@ -101,3 +101,46 @@ and six ring overruns (feedback stepped to -442 ppm); the hose-side Wi-Fi
 adb transport then wedged and the logger stopped at minute 12. See
 `results-m2-soak-partial.txt`. The script now bounds every adb call and
 reconnects. A clean 60-minute run is still owed.
+
+## 2026-10-19: AMS-22 line outputs carry direct monitor but not USB playback
+
+The L2 rig was rebuilt with the EVO8 as the measurement host (EVO Out 3 to
+the AMS-22 input, AMS output to EVO In 4, EVO Out 4 to EVO In 3 as the
+reference). Cabling and channel mapping were verified with per-leg tone
+tests (PipeWire out ch 2 = Out 3, ch 3 = Out 4; capture ch 2 = In 4, ch 3 =
+In 3).
+
+One fault blocks the measurement, and it is in the AMS-22, not in the app:
+
+- With a burst into the AMS input, the EVO records exactly one arrival
+  (~1 ms after the reference) regardless of whether TONE3000 is running,
+  force-stopped, on Oboe, or on USB Direct. That is the AMS's direct
+  monitor feed.
+- The app path is absent at both expected lags: ~5.5 ms plus buffering on
+  USB Direct and ~88 ms on Oboe. Oboe output was confirmed to be
+  `AUDIO_DEVICE_OUT_USB_DEVICE`, so it was not the tablet speaker.
+- USB Direct was instrumented during the test: the playback path reported
+  `outL=outR=-33 dBFS, xruns=0` with the input tone present, i.e. the
+  driver submitted non-silent stereo playback URBs.
+- The AMS has no UAC2 feature unit (no playback volume or mute control),
+  so no software control can be muting it. `amixer -c 4` on a Linux host
+  confirms there is nothing to unmute.
+- The same AMS-22 plays USB audio on a Linux PC into its **headphone**
+  output (verified by listening), but its **rear OUTPUT L and OUTPUT R
+  jacks** carry only direct monitor on both the PC and the tablet.
+- Firmware is already 1.10 (current). Cold-boot power ordering (power the
+  AMS first, then the host, through a powered hub, and again with the AMS
+  direct to the tablet) made no difference. Both output jacks were tested.
+
+Conclusion: the unit's line-output playback path is faulty; the headphone
+output works. This is a device service issue, not a driver or app bug.
+USB Direct playback remains verified by the probe's 5.52 ms digital-loop
+RTL and by the momentary playback instrumentation.
+
+Workaround for a future L2 run: feed EVO In 4 from the AMS **PHONES** jack
+with a 3.5 mm to 1/4" adapter (or a 3.5 mm cable into the PC's line input),
+and keep the correlation window at 2-200 ms so the ~1 ms monitor feed stays
+excluded. The L2 e2e number remains unmeasured until then.
+
+The probe soak is also blocked: it needs the AMS, and the unit is out for
+service.

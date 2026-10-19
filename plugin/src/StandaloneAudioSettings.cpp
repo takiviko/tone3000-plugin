@@ -180,6 +180,26 @@ void StandaloneAudioSettings::changeListenerCallback(juce::ChangeBroadcaster*) {
   applyRawInputMode();
   ensureInitialPolicies();
   applyMonitoringPolicy();
+  // Plan M3.5: one diagnostics line per state change. Latency is the device's
+  // own readback, not the requested setup; drift only exists on backends that
+  // estimate it.
+  if (auto* dm = deviceManager()) {
+    if (auto* device = dm->getCurrentAudioDevice()) {
+      juce::String line =
+          "[AudioSettings] " + dm->getCurrentAudioDeviceType() + " | " +
+          device->getName() + " | " +
+          juce::String(device->getCurrentSampleRate(), 0) + " Hz, " +
+          juce::String(device->getCurrentBufferSizeSamples()) + " frames, in " +
+          juce::String(device->getInputLatencyInSamples()) + " / out " +
+          juce::String(device->getOutputLatencyInSamples()) + " samples, xruns " +
+          juce::String(device->getXRunCount());
+#if JUCE_ANDROID
+      if (auto* diag = dynamic_cast<t3k::AudioDeviceDiagnostics*>(device))
+        line << ", drift " << juce::String(diag->getDriftPpm(), 1) << " ppm";
+#endif
+      juce::Logger::writeToLog(line);
+    }
+  }
   if (onDeviceStateChanged)
     onDeviceStateChanged();
 }
@@ -280,6 +300,25 @@ juce::var StandaloneAudioSettings::getState() {
   obj->setProperty("bufferSizes", bufferSizes);
   obj->setProperty("sampleRate", device != nullptr ? device->getCurrentSampleRate() : 0.0);
   obj->setProperty("bufferSize", device != nullptr ? device->getCurrentBufferSizeSamples() : 0);
+
+  // Honest diagnostics (plan M3.1/M3.5): the device's own latency readback,
+  // its xrun counter, and drift when the backend estimates it. These are
+  // readback values, not the requested setup.
+  obj->setProperty("inputLatencySamples",
+                   device != nullptr ? device->getInputLatencyInSamples() : 0);
+  obj->setProperty("outputLatencySamples",
+                   device != nullptr ? device->getOutputLatencyInSamples() : 0);
+  obj->setProperty("xrunCount", device != nullptr ? device->getXRunCount() : 0);
+  double driftPpm = 0.0;
+  bool hasDrift = false;
+#if JUCE_ANDROID
+  if (auto* diag = dynamic_cast<t3k::AudioDeviceDiagnostics*>(device)) {
+    driftPpm = diag->getDriftPpm();
+    hasDrift = true;
+  }
+#endif
+  obj->setProperty("driftPpm", driftPpm);
+  obj->setProperty("hasDrift", hasDrift);
 
   obj->setProperty("hasControlPanel", device != nullptr && device->hasControlPanel());
   obj->setProperty("hearYourself",

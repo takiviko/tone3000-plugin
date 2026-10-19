@@ -13,6 +13,17 @@
 
 namespace t3k {
 
+// Optional diagnostics that a custom device can expose to the settings UI and
+// the log without widening juce::AudioIODevice (the plan's M3.5 honest-latency
+// readout). Cast the current device to this interface; generic backends do not
+// implement it.
+class AudioDeviceDiagnostics {
+ public:
+  virtual ~AudioDeviceDiagnostics() = default;
+  // Measured clock drift in ppm, or 0 when the backend does not estimate it.
+  virtual double getDriftPpm() const = 0;
+};
+
 class UsbDirectAudioIODeviceType : public juce::AudioIODeviceType {
  public:
   UsbDirectAudioIODeviceType();

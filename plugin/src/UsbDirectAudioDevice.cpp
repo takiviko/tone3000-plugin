@@ -224,12 +224,17 @@ bool applyControl(UsbfsTransport& transport, const StreamConfig& cfg, juce::Stri
 // The device
 
 class UsbDirectAudioIODevice final : public juce::AudioIODevice,
-                                     public UsbAudioStream::Callback {
+                                     public UsbAudioStream::Callback,
+                                     public AudioDeviceDiagnostics {
  public:
   explicit UsbDirectAudioIODevice(const juce::String& deviceName)
       : juce::AudioIODevice(deviceName, kTypeName) {}
 
   ~UsbDirectAudioIODevice() override { close(); }
+
+  double getDriftPpm() const override {
+    return stream_ != nullptr ? stream_->captureStats().driftPpm : 0.0;
+  }
 
   juce::StringArray getOutputChannelNames() override {
     return {"Output 1", "Output 2"};

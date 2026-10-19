@@ -43,7 +43,7 @@ fi
 # logger forever (the stream itself kept running); a timeout plus one
 # reconnect keeps the CSV going.
 ADB_TIMEOUT=${ADB_TIMEOUT:-30}
-adb() { timeout "$ADB_TIMEOUT" command adb -s "$ANDROID_SERIAL" "$@"; }
+adb() { timeout "$ADB_TIMEOUT" env adb -s "$ANDROID_SERIAL" "$@"; }
 
 reconnect() {
     adb disconnect "$ANDROID_SERIAL" >/dev/null 2>&1 || true

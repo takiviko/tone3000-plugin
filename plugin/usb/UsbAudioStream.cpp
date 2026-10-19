@@ -145,7 +145,8 @@ void UsbAudioStream::handleCapture(Urb& urb) {
 
   size_t offset = 0;
   int64_t framesInUrb = 0;
-  for (int p = 0; p < options_.packetsPerUrb; ++p) {
+  const int capturePackets = static_cast<int>(urb.packetLengths.size());
+  for (int p = 0; p < capturePackets; ++p) {
     ++captureStats_.packets;
     // Xrun check against the nominal packet with the documented +/-1 frame
     // tolerance (the allocation is nominal+1; actual_length decides).
@@ -198,7 +199,13 @@ void UsbAudioStream::handleFeedback(Urb& urb) {
   size_t offset = 0;
   const uint8_t* lastValid = nullptr;
 
-  for (int p = 0; p < options_.packetsPerUrb; ++p) {
+  // Walk the URB's own packet count, not options_.packetsPerUrb: the
+  // feedback URB carries kFeedbackPackets (its own 8-packet cadence) no
+  // matter how long the audio URBs are. Reading it with the audio count
+  // walked off the vectors and crashed parseFeedback on every buffer
+  // above 1 ms (SIGSEGV at 96-frame blocks, 2026-10-19).
+  const int packets = static_cast<int>(urb.packetLengths.size());
+  for (int p = 0; p < packets; ++p) {
     ++feedbackStats_.packets;
     const uint32_t actual = urb.packetActual[p];
     if (urb.packetStatus[p] != 0 || actual < fbBytes) {
@@ -239,7 +246,7 @@ void UsbAudioStream::handlePlayback(Urb& urb) {
   lastPlaybackStartFrame_ = urb.startFrame;
   playbackStats_.lastStartFrame = urb.startFrame;
 
-  for (int p = 0; p < options_.packetsPerUrb; ++p) {
+  for (int p = 0; p < static_cast<int>(urb.packetLengths.size()); ++p) {
     ++playbackStats_.packets;
     const uint32_t expected = urb.packetLengths[p];
     const uint32_t actual = urb.packetActual[p];

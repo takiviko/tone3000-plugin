@@ -488,6 +488,41 @@ TEST(UsbAudioStream, FeedbackReapDrivesClockAndDriftStats) {
   EXPECT_EQ(transport.inFlight.size(), 9u);
 }
 
+TEST(UsbAudioStream, FeedbackReapUsesItsOwnPacketCountAtLargerAudioUrbs) {
+  // The feedback URB keeps its 8-packet cadence while the audio URBs grow
+  // (96-frame blocks = 16 packets at 48 kHz). Walking the feedback URB with
+  // the audio count read past its vectors and crashed parseFeedback
+  // (SIGSEGV when the buffer was raised to 96, 2026-10-19).
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream::Options options;
+  options.packetsPerUrb = 16;
+  UsbAudioStream stream(feedbackConfig(), options, transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  Urb* fb = firstFeedback(transport);
+  ASSERT_NE(fb, nullptr);
+  ASSERT_EQ(fb->packetLengths.size(), 8u);
+  // 6.003 frames per microframe in 16.16 = +501 ppm at 48 kHz high speed.
+  const uint32_t raw = 393413;
+  for (size_t p = 0; p < fb->packetLengths.size(); ++p) {
+    uint8_t* at = fb->buffer.data() + p * 4;
+    at[0] = static_cast<uint8_t>(raw & 0xff);
+    at[1] = static_cast<uint8_t>((raw >> 8) & 0xff);
+    at[2] = static_cast<uint8_t>((raw >> 16) & 0xff);
+    at[3] = static_cast<uint8_t>((raw >> 24) & 0xff);
+    fb->packetActual[p] = 4;
+    fb->packetStatus[p] = 0;
+  }
+  transport.complete(fb, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+
+  EXPECT_EQ(stream.feedbackStats().packets, 8u);
+  EXPECT_EQ(stream.feedbackStats().feedbackPackets, 8u);
+  EXPECT_EQ(stream.feedbackStats().feedbackErrors, 0u);
+  EXPECT_NEAR(stream.feedbackStats().feedbackValue, 6.003, 1e-4);
+}
+
 TEST(UsbAudioStream, FeedbackSubmitFailureFallsBackInsteadOfStopping) {
   FakeTransport transport;
   RecordingCallback cb;

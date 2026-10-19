@@ -359,6 +359,11 @@ juce::var StandaloneAudioSettings::setDeviceType(const juce::String& typeName) {
   if (dm == nullptr)
     return makeResult("Audio settings are unavailable.");
 
+  // Selecting the current type again must not close and reopen the stream.
+  // The reopen is where a failed USB Direct open used to fall back to Oboe.
+  if (typeName == dm->getCurrentAudioDeviceType())
+    return makeResult({});
+
 #if JUCE_ANDROID
   // Leaving USB Direct hands the device back to the Android audio HAL, which
   // still has no kernel driver bound to the interfaces we claimed. The HAL
@@ -409,6 +414,16 @@ juce::var StandaloneAudioSettings::setDevice(const juce::String& kind,
 #endif
 
   auto setup = dm->getAudioDeviceSetup();
+
+  // Re-selecting the device that is already open is not a change; reopening
+  // it needlessly risks the Oboe fallback path (and an ANR). Retry uses
+  // restartDevice(), not this setter.
+  const bool sameDevice =
+      (kind == "linked" && name == setup.inputDeviceName && name == setup.outputDeviceName) ||
+      (kind == "input" && name == setup.inputDeviceName) ||
+      (kind == "output" && name == setup.outputDeviceName);
+  if (dm->getCurrentAudioDevice() != nullptr && sameDevice)
+    return makeResult({});
 
   // The side(s) whose device is changing get a fresh device context; a mask
   // tracked for the old device on that side no longer means anything (and

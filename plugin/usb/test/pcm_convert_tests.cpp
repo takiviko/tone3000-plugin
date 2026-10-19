@@ -2,6 +2,7 @@
 // produce garbage audio, so both packings are pinned bit-exactly).
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "PcmConvert.h"
@@ -79,3 +80,10 @@ TEST(PcmConvert, InterleavedLayoutIsChannelMajor) {
 
 }  // namespace
 }  // namespace t3k::usb
+
+TEST(PcmConvert, NaNAndInfinitiesAreSafe) {
+  // A NaN output from the DSP must never become full-scale wire garbage.
+  EXPECT_EQ(t3k::usb::pcm::floatToInt24(std::numeric_limits<float>::quiet_NaN()), 0);
+  EXPECT_EQ(t3k::usb::pcm::floatToInt24(std::numeric_limits<float>::infinity()), 8388607);
+  EXPECT_EQ(t3k::usb::pcm::floatToInt24(-std::numeric_limits<float>::infinity()), -8388608);
+}

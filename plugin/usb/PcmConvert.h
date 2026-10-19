@@ -31,6 +31,10 @@ constexpr float int24ToFloat(int32_t v) {
 
 /** Float to signed 24-bit, clipping at the rails. */
 constexpr int32_t floatToInt24(float f) {
+  // A NaN would fall through both comparisons and convert through undefined
+  // behaviour; in practice that emits full-scale garbage (heard as white
+  // noise). Silence is the safe wire value.
+  if (f != f) return 0;
   const float scaled = f * 8388608.0f;
   if (scaled >= 8388607.0f) return 8388607;
   if (scaled <= -8388608.0f) return -8388608;

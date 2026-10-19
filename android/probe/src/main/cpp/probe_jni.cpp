@@ -261,9 +261,12 @@ struct ProbeCallback : t3k::usb::UsbAudioStream::Callback {
   bool burstActive = false;
   std::vector<float> captureLog;
   std::mutex logMutex;
+  // Log the input while playing the steady sine (AMS loopback ON), so the
+  // playback can be inspected digitally, before the DAC.
+  std::atomic<bool> logCapture{false};
 
   void process(const float* in, float* out, int frames, int channels) override {
-    if (mode.load() == 1) {
+    if (mode.load() == 1 || logCapture.load()) {
       std::lock_guard<std::mutex> lock(logMutex);
       for (int f = 0; f < frames; ++f) {
         captureLog.push_back(in[static_cast<size_t>(f) * channels]);
@@ -614,6 +617,40 @@ Java_com_TONE3000_USBCHECK_NativeBridge_nativeStart(JNIEnv* env, jclass, jint fd
   g_callback.rate = rate;
   std::string err = openStream(fd, cfg, packetsPerUrb, urbsInFlight);
   return env->NewStringUTF(err.c_str());
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_TONE3000_USBCHECK_NativeBridge_nativeCaptureSine(
+    JNIEnv* env, jclass, jint fd, jbyteArray rawDescriptors, jint vid, jint pid,
+    jint rate, jint channels, jint subslot, jint packetsPerUrb, jint urbsInFlight,
+    jint millis) {
+  const std::vector<uint8_t> raw = bytesFrom(env, rawDescriptors);
+  StreamConfig cfg =
+      configFrom(rate, channels, subslot, raw.data(), raw.size(), vid, pid);
+  g_callback.mode = 0;  // steady sine
+  g_callback.rate = rate;
+  g_callback.logCapture = true;
+  {
+    std::lock_guard<std::mutex> lock(g_callback.logMutex);
+    g_callback.captureLog.clear();
+  }
+  const std::string err = openStream(fd, cfg, packetsPerUrb, urbsInFlight);
+  if (!err.empty()) {
+    g_callback.logCapture = false;
+    return nullptr;
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(std::max(1, millis)));
+  std::vector<float> capture;
+  {
+    std::lock_guard<std::mutex> lock(g_callback.logMutex);
+    capture = g_callback.captureLog;
+  }
+  closeStream();
+  g_callback.logCapture = false;
+  jfloatArray out = env->NewFloatArray(static_cast<jsize>(capture.size()));
+  if (out != nullptr && !capture.empty())
+    env->SetFloatArrayRegion(out, 0, static_cast<jsize>(capture.size()), capture.data());
+  return out;
 }
 
 JNIEXPORT jstring JNICALL

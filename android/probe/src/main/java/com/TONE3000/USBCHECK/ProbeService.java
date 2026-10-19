@@ -189,6 +189,9 @@ public final class ProbeService extends Service implements UsbShell.Listener {
             case "rtl":
                 runRtl(rate, packets, urbs, ring);
                 break;
+            case "loopback":
+                runLoopback(rate, packets, urbs, ring);
+                break;
             case "sweep":
                 runSweep(rate, ring);
                 break;
@@ -270,6 +273,33 @@ public final class ProbeService extends Service implements UsbShell.Listener {
                 rate, 2, 3, packets, urbs, 5);
         appendCsv(rows);
         for (String line : rows.split("\n")) log(line);
+    }
+
+    /** AMS loopback ON: record the captured input, which is the USB playback
+        mixed digitally before the DAC, to files/loopback.csv. */
+    private void runLoopback(int rate, int packets, int urbs, int ring) {
+        UsbDevice device = shell.getActiveDevice();
+        if (device == null) {
+            log("loopback: no device");
+            return;
+        }
+        NativeBridge.nativeStop();
+        NativeBridge.nativeConfigureRing(ring);
+        float[] cap = NativeBridge.nativeCaptureSine(
+                activeFd, shell.getRawDescriptors(), device.getVendorId(),
+                device.getProductId(), rate, 2, 3, packets, urbs, 2000);
+        if (cap == null || cap.length == 0) {
+            log("loopback: no capture (is LOOPBACK on?)");
+            return;
+        }
+        StringBuilder sb = new StringBuilder(cap.length * 10);
+        for (float v : cap) sb.append(v).append('\n');
+        try (FileOutputStream out = openFileOutput("loopback.csv", MODE_PRIVATE)) {
+            out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+            log("loopback: wrote " + cap.length + " samples to files/loopback.csv");
+        } catch (IOException e) {
+            log("loopback: write failed: " + e.getMessage());
+        }
     }
 
     private void runSweep(int rate, int ring) {

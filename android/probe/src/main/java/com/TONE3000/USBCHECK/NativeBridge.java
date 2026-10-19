@@ -39,6 +39,13 @@ public final class NativeBridge {
                                           int rate, int channels, int subslot,
                                           int packetsPerUrb, int urbsInFlight, int trials);
 
+    /** Play the steady sine while logging the captured input (AMS loopback
+        ON, so the capture is our playback) and return the mono samples. */
+    public static native float[] nativeCaptureSine(int fd, byte[] rawDescriptors, int vid,
+                                                   int pid, int rate, int channels,
+                                                   int subslot, int packetsPerUrb,
+                                                   int urbsInFlight, int millis);
+
     /** Sweep rtl across the frames/URB x URBs-in-flight matrix (plan M1.6)
         and return one CSV row per configuration. */
     public static native String nativeSweep(int fd, byte[] rawDescriptors, int vid, int pid,

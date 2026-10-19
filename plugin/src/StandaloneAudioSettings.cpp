@@ -359,6 +359,22 @@ juce::var StandaloneAudioSettings::setDeviceType(const juce::String& typeName) {
   if (dm == nullptr)
     return makeResult("Audio settings are unavailable.");
 
+#if JUCE_ANDROID
+  // Leaving USB Direct hands the device back to the Android audio HAL, which
+  // still has no kernel driver bound to the interfaces we claimed. The HAL
+  // retries and the binder call blocks the message thread long enough to ANR
+  // (observed 2026-10-19: input dispatch timed out, audioserver 40% CPU).
+  // Only a physical replug rebinds snd-usb-audio, so ask for it rather than
+  // hanging the UI. With no open device (AMS unplugged) the switch is fine.
+  if (dm->getCurrentAudioDeviceType() == "USB Direct" && typeName != "USB Direct" &&
+      dm->getCurrentAudioDevice() != nullptr) {
+    return makeResult(
+        "Replug the AMS-22 before switching to " + typeName +
+        ". USB Direct still holds the interface, and the Android audio driver "
+        "only rebinds on a physical replug.");
+  }
+#endif
+
   // Entirely new device context; any tracked request belongs to the old type.
   explicitInputChannels.clear();
   explicitOutputChannels.clear();
@@ -377,6 +393,20 @@ juce::var StandaloneAudioSettings::setDevice(const juce::String& kind,
   auto* dm = deviceManager();
   if (dm == nullptr)
     return makeResult("Audio settings are unavailable.");
+
+#if JUCE_ANDROID
+  // Selecting the AMS-22 on Oboe while snd-usb-audio is detached makes
+  // AAudio's openStream block inside the audio HAL (ANR 2026-10-19,
+  // audioserver binder wait). The kernel driver only rebinds on a physical
+  // replug, so refuse with that instruction instead of hanging the UI.
+  if (dm->getCurrentAudioDeviceType() != "USB Direct" &&
+      name.containsIgnoreCase("AMS-22") && !t3k::usbDirectKernelDriverBound()) {
+    return makeResult(
+        "Replug the AMS-22 before selecting it. Its kernel driver is detached "
+        "after USB Direct, and Android's audio driver only rebinds on a "
+        "physical replug.");
+  }
+#endif
 
   auto setup = dm->getAudioDeviceSetup();
 

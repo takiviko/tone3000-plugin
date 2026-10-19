@@ -24,6 +24,12 @@ class AudioDeviceDiagnostics {
   virtual double getDriftPpm() const = 0;
 };
 
+// True when snd-usb-audio is still bound to the AudioControl interface (a
+// physical replug has rebound it). USB Direct detaches it, and Oboe cannot
+// open the device again until it is replugged; the settings guard uses this
+// to refuse a transition that would block the audio HAL.
+bool usbDirectKernelDriverBound();
+
 class UsbDirectAudioIODeviceType : public juce::AudioIODeviceType {
  public:
   UsbDirectAudioIODeviceType();

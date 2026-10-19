@@ -56,6 +56,7 @@ class UsbDirectBridgeClass : public juce::JNIClassBase {
     isAvailable = resolveStaticMethod(env, "isAvailable", "()Z");
     deviceName = resolveStaticMethod(env, "deviceName", "()Ljava/lang/String;");
     rawDescriptors = resolveStaticMethod(env, "getRawDescriptors", "()[B");
+    kernelDriverBound = resolveStaticMethod(env, "kernelDriverBound", "()Z");
   }
 
   jmethodID openDevice = nullptr;
@@ -63,6 +64,7 @@ class UsbDirectBridgeClass : public juce::JNIClassBase {
   jmethodID isAvailable = nullptr;
   jmethodID deviceName = nullptr;
   jmethodID rawDescriptors = nullptr;
+  jmethodID kernelDriverBound = nullptr;
 };
 
 UsbDirectBridgeClass gBridge;
@@ -90,6 +92,19 @@ void closeJavaDevice() {
   if (env == nullptr) return;
   env->CallStaticVoidMethod(gBridge.getJclass(), gBridge.closeDevice);
   if (env->ExceptionCheck()) env->ExceptionClear();
+}
+
+bool javaKernelDriverBound() {
+  if (!bridgeReady() || gBridge.kernelDriverBound == nullptr) return false;
+  auto* env = juce::getEnv();
+  if (env == nullptr) return false;
+  const jboolean bound = env->CallStaticBooleanMethod(gBridge.getJclass(),
+                                                      gBridge.kernelDriverBound);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return false;
+  }
+  return bound == JNI_TRUE;
 }
 
 bool javaDeviceAvailable() {
@@ -592,6 +607,8 @@ int UsbDirectAudioIODeviceType::getIndexOfDevice(juce::AudioIODevice* device, bo
   return device != nullptr && device->getTypeName() == getTypeName() ? 0 : -1;
 }
 
+bool usbDirectKernelDriverBound() { return javaKernelDriverBound(); }
+
 juce::AudioIODevice* UsbDirectAudioIODeviceType::createDevice(
     const juce::String& outputDeviceName, const juce::String& inputDeviceName) {
   if (!available_ || (outputDeviceName.isEmpty() && inputDeviceName.isEmpty()))
@@ -611,6 +628,16 @@ Java_com_TONE3000_TONE3000_UsbDirectBridge_nativeQuirkIgnoresInterface(
                                                            static_cast<uint16_t>(pid));
   if (quirk == nullptr || iface < 0 || iface >= 32) return JNI_FALSE;
   return (quirk->ignoreInterfaces & (1u << iface)) != 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+// JNI: is snd-usb-audio still bound to the AudioControl interface? The
+// settings guard uses this to refuse an Oboe open that would otherwise block
+// inside the audio HAL (ANR 2026-10-19) until the AMS-22 is replugged.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_TONE3000_TONE3000_UsbDirectBridge_nativeKernelDriverBound(JNIEnv*, jclass, jint fd) {
+  if (fd < 0) return JNI_FALSE;
+  t3k::usb::android::UsbfsTransport transport(fd);
+  return transport.getDriver(0).empty() ? JNI_FALSE : JNI_TRUE;
 }
 
 #endif  // JUCE_ANDROID

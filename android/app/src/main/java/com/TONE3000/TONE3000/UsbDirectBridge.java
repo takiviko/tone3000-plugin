@@ -143,6 +143,25 @@ public final class UsbDirectBridge {
         return null;
     }
 
+    /**
+     * True when the kernel's snd-usb-audio still holds the AudioControl
+     * interface, i.e. a physical replug has rebound it. False after USB
+     * Direct claimed the interfaces: Oboe/AAudio opening the device in that
+     * state blocks in the audio HAL long enough to ANR (observed 2026-10-19).
+     *
+     * Opening the device without claiming an interface is side-effect free;
+     * the ioctl only asks which driver is bound.
+     */
+    public static boolean kernelDriverBound() {
+        UsbDevice d = findAudioDevice();
+        if (d == null || usbManager == null || !usbManager.hasPermission(d)) return false;
+        UsbDeviceConnection conn = usbManager.openDevice(d);
+        if (conn == null) return false;
+        boolean bound = nativeKernelDriverBound(conn.getFileDescriptor());
+        conn.close();
+        return bound;
+    }
+
     private static final BroadcastReceiver permissionReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -171,4 +190,7 @@ public final class UsbDirectBridge {
 
     /** Quirk registry lookup (plugin/usb/UsbQuirks, via JNI). */
     private static native boolean nativeQuirkIgnoresInterface(int vid, int pid, int iface);
+
+    /** USBDEVFS_GETDRIVER on interface 0 (plugin/usb/android/UsbfsTransport). */
+    private static native boolean nativeKernelDriverBound(int fd);
 }

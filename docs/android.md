@@ -337,14 +337,29 @@ shipping layout (8 packets x 4 URBs, 128-frame ring, 48 kHz): 7,990
 packets/s (nominal 8,000), zero xruns/overruns, **5.52 ms digital-loop
 RTL**. Full evidence: `plugin/docs/usb-audio/`.
 
+**Diagnostics:** Settings -> Audio Interface shows the device's reported
+input/output latency, the xrun count and (USB Direct only) clock drift, and
+the app log gets one `[AudioSettings] ...` line per device change with the
+same readback. These are the device's own numbers, not the requested setup.
+
+**Debug builds:** Gradle's debug variant defaults to `-O0`. That is not
+usable for latency work: a 48-frame callback has a 1 ms deadline, and an
+unoptimized NAM chain misses it (measured: ~900 capture frames/s dropped
+with two models plus an IR). `plugin/CMakeLists.txt` links an interface
+target that puts `-O3` after JUCE's `-g -O0` for Android Debug builds; keep
+that in place when measuring, or use a release build.
+
 **Limitations:** the AMS-22 is the only validated device; 44.1/88.2 kHz
 need fractional microframe packets and are not exposed (the app is pinned at
 48 kHz); the AMS-22 does not answer the UAC2 GET_CUR rate readback, so the
 set rate is verified through feedback and cadence; UAC1 is host-tested only.
 The first on-device switch can freeze while claiming the interfaces if Oboe
 still holds the AMS-22; `plugin/docs/usb-audio/m3-report.md` records the
-state and the workaround. Do not treat USB Direct as production-ready until
-that switch and the L2 e2e number are verified on the tablet.
+state and the workaround. The development AMS-22's **rear line outputs**
+currently pass direct monitor but not USB playback (its headphone output
+does), so the L2 end-to-end number is deferred until that unit is repaired
+or replaced; the driver-side numbers are unaffected. Do not treat USB Direct
+as production-ready until the L2 e2e number is verified on the tablet.
 
 ## Known gaps
 

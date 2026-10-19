@@ -37,12 +37,12 @@ Blob makeUac2Config() {
   // Clock source id 1: internal fixed, frequency control present.
   b.add({0x08, 0x24, 0x0A, 0x01, 0x01, 0x03, 0x00, 0x00});
   // Input terminal id 2 (USB streaming), 2 ch.
-  b.add({0x10, 0x24, 0x02, 0x02, 0x01, 0x01, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00,
+  b.add({0x10, 0x24, 0x02, 0x02, 0x01, 0x01, 0x00, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00,
          0x00, 0x00, 0x00});
   // Output terminal id 3 (speaker), source 6.
   b.add({0x0C, 0x24, 0x03, 0x03, 0x03, 0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00});
   // Input terminal id 4 (microphone), 2 ch.
-  b.add({0x10, 0x24, 0x02, 0x04, 0x02, 0x01, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00,
+  b.add({0x10, 0x24, 0x02, 0x04, 0x02, 0x01, 0x00, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00,
          0x00, 0x00, 0x00});
   // Output terminal id 5 (USB streaming), source 4.
   b.add({0x0C, 0x24, 0x03, 0x05, 0x01, 0x01, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00});
@@ -149,7 +149,7 @@ TEST(UacDescriptors, Uac2FormatAndEndpoints) {
   ASSERT_TRUE(parseConfig(b.bytes.data(), b.bytes.size(), tree));
   const AltSetting* play = tree.streamingAlts(true)[0];
   EXPECT_EQ(play->altSetting, 1);
-  EXPECT_EQ(play->format.channels, 0);  // UAC2: channels live on the terminal
+  EXPECT_EQ(play->format.channels, 2);  // resolved from the input terminal
   EXPECT_EQ(play->format.subslotBytes, 3);
   EXPECT_EQ(play->format.bitResolution, 24);
   ASSERT_NE(play->dataEndpoint(), nullptr);
@@ -174,8 +174,9 @@ TEST(UacDescriptors, Uac2FindAltIsRateAgnostic) {
   EXPECT_EQ(tree.findAlt(true, 48000, 2)->altSetting, 1);
   EXPECT_EQ(tree.findAlt(true, 96000, 2)->altSetting, 1);
   EXPECT_EQ(tree.findAlt(false, 44100, 2)->altSetting, 1);
-  // UAC2 formats carry no channel count, so the filter cannot reject on it.
-  EXPECT_EQ(tree.findAlt(false, 48000, 1)->altSetting, 1);
+  // The terminal supplies the channel count, so a mismatched request is
+  // rejected rather than silently accepted.
+  EXPECT_EQ(tree.findAlt(false, 48000, 1), nullptr);
 }
 
 TEST(UacDescriptors, Uac1RatesSelectAltsetting) {
@@ -273,6 +274,42 @@ TEST(UacDescriptors, RealAms22Fixture) {
   // streams.
   EXPECT_EQ(tree.streamingAlts(true).size(), 1u);
   EXPECT_EQ(tree.streamingAlts(false).size(), 1u);
+}
+
+TEST(UacDescriptors, RealEvo8Fixture) {
+  // Captured by the probe's dump mode with the EVO8 on the tablet
+  // (2026-10-19). 6-in/6-out UAC2, explicit feedback, clock selector 40 ->
+  // programmable source 41, playback alts 24-bit (subslot 4) then 16-bit.
+  FILE* f = std::fopen(T3K_USB_TEST_FIXTURES_DIR "/evo8-highspeed.bin", "rb");
+  ASSERT_NE(f, nullptr) << "fixture missing; run the probe's dump mode";
+  std::vector<uint8_t> raw(4096);
+  const size_t len = std::fread(raw.data(), 1, raw.size(), f);
+  std::fclose(f);
+  ASSERT_EQ(len, 996u);
+
+  ConfigTree tree;
+  ASSERT_TRUE(parseConfig(raw.data(), len, tree));
+  EXPECT_EQ(tree.uacVersion(), UacVersion::uac2);
+
+  const Entity* clock = tree.rateClockSource();
+  ASSERT_NE(clock, nullptr);
+  EXPECT_EQ(clock->id, 41);
+  EXPECT_TRUE(clock->clockFrequencyControl);
+
+  const auto plays = tree.streamingAlts(true);
+  ASSERT_FALSE(plays.empty());
+  EXPECT_EQ(plays[0]->format.channels, 6);
+  EXPECT_EQ(plays[0]->format.subslotBytes, 4);
+  EXPECT_EQ(plays[0]->format.bitResolution, 24);
+  ASSERT_NE(tree.feedbackEndpointFor(true), nullptr);
+  EXPECT_EQ(tree.feedbackEndpointFor(true)->address, 0x81);
+
+  const auto caps = tree.streamingAlts(false);
+  ASSERT_FALSE(caps.empty());
+  EXPECT_EQ(caps[0]->format.channels, 6);
+  EXPECT_EQ(caps[0]->format.subslotBytes, 4);
+  EXPECT_EQ(caps[0]->dataEndpoint()->address, 0x82);
+  EXPECT_NE(tree.findAlt(true, 48000, 6), nullptr);
 }
 
 TEST(UacDescriptors, TruncatedBlobsAreHandled) {

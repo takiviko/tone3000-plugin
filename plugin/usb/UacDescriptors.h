@@ -54,6 +54,7 @@ struct Entity {
   uint16_t terminalType = 0;  // terminals
   uint8_t sourceId = 0;       // output terminals / feature units
   uint8_t cSourceId = 0;      // UAC2: which clock source feeds this entity
+  uint8_t channels = 0;       // input terminals: bNrChannels (UAC2 rates/format omit it)
   uint8_t clockType = 0;      // clock sources: bits 1:0 of bmAttributes
   bool clockFrequencyControl = false;  // bmControls bit 0 (UAC2)
   std::vector<uint8_t> pins;           // selector/feature inputs

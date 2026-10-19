@@ -26,6 +26,12 @@ deliberately uncommitted).
 - Opening at 96 kHz now updates the device clock and packet cadence before
   `applyControl`; previously the config stayed at 48 kHz while the app
   requested 96 kHz.
+- **A second interface (EVO8) parses and streams generically now**: UAC2
+  terminal channel counts are resolved (6-in/6-out), the shell uses the
+  stream's channel count, and the output pair maps onto the wire channels.
+- **App startup is slow (~30 s to first paint)** and opens the default
+  (Oboe) device before the selected type; when the kernel driver is detached
+  that open blocks the whole launch. See the plan's 2026-10-19 handoff.
 - **The L2 end-to-end number is still unmeasured.** The development AMS-22
   now passes direct monitor but not USB playback at either rear line
   output (its headphone output works), on both hosts, with firmware 1.10.

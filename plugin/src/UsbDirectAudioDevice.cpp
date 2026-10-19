@@ -33,7 +33,8 @@ using usb::UsbAudioStream;
 using usb::android::UsbfsTransport;
 
 constexpr int kUrbsInFlight = 4;    // 3 misses the OUT slot ~2% of the time
-constexpr int kWireChannels = 2;
+constexpr int kDefaultWireChannels = 2;
+constexpr int kMaxWireChannels = 32;  // UAC2 stream channel ceiling we accept
 constexpr const char* kTypeName = "USB Direct";
 
 // ---------------------------------------------------------------------------
@@ -167,7 +168,7 @@ bool buildConfig(const std::vector<uint8_t>& raw, double sampleRate, StreamConfi
   cfg.uac = tree.uacVersion();
   cfg.speed = usb::UsbSpeed::high;  // the AMS-22 and this app's target are HS
   cfg.sampleRate = static_cast<uint32_t>(sampleRate);
-  cfg.channels = kWireChannels;
+  cfg.channels = 0;  // decided from the selected altsetting below
   cfg.bitResolution = 24;
   cfg.subslotBytes = 4;
   cfg.feedback16_16 = cfg.uac == usb::UacVersion::uac2;
@@ -180,10 +181,10 @@ bool buildConfig(const std::vector<uint8_t>& raw, double sampleRate, StreamConfi
     }
   }
 
-  const usb::AltSetting* play =
-      tree.findAlt(true, cfg.sampleRate, static_cast<uint8_t>(cfg.channels));
-  const usb::AltSetting* cap =
-      tree.findAlt(false, cfg.sampleRate, static_cast<uint8_t>(cfg.channels));
+  // 0 channels means "any": UAC2 keeps the count on the terminal, which the
+  // parser resolves. A stereo-only device still yields 2; the EVO8 yields 6.
+  const usb::AltSetting* play = tree.findAlt(true, cfg.sampleRate, 0);
+  const usb::AltSetting* cap = tree.findAlt(false, cfg.sampleRate, 0);
   if (play == nullptr || play->dataEndpoint() == nullptr) {
     error = "no playback altsetting for this sample rate";
     return false;
@@ -192,6 +193,14 @@ bool buildConfig(const std::vector<uint8_t>& raw, double sampleRate, StreamConfi
     error = "no capture altsetting for this sample rate";
     return false;
   }
+  const uint8_t playChannels = play->format.channels > 0 ? play->format.channels : 2;
+  const uint8_t capChannels =
+      cap->format.channels > 0 ? cap->format.channels : playChannels;
+  if (playChannels != capChannels) {
+    error = "asymmetric input/output channel counts are not supported yet";
+    return false;
+  }
+  cfg.channels = playChannels;
   cfg.playbackEndpoint = play->dataEndpoint()->address;
   cfg.playbackInterface = play->interfaceNumber;
   cfg.playbackAltsetting = play->altSetting;
@@ -252,10 +261,14 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   }
 
   juce::StringArray getOutputChannelNames() override {
-    return {"Output 1", "Output 2"};
+    juce::StringArray names;
+    for (int i = 0; i < wireChannels_; ++i) names.add("Output " + juce::String(i + 1));
+    return names;
   }
   juce::StringArray getInputChannelNames() override {
-    return {"Input 1", "Input 2"};
+    juce::StringArray names;
+    for (int i = 0; i < wireChannels_; ++i) names.add("Input " + juce::String(i + 1));
+    return names;
   }
 
   juce::Array<double> getAvailableSampleRates() override {
@@ -329,6 +342,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
       return lastError_;
     }
 
+    wireChannels_ = juce::jmax(1, static_cast<int>(config_.channels));
     inputMap_ = channelsFromMask(inputChannels);
     outputMap_ = channelsFromMask(outputChannels);
     const int framesPerPacket = config_.nominalFramesPerPacket(config_.speed);
@@ -351,8 +365,8 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     }
     bufferFrames_ = packetsPerUrb_ * framesPerPacket;
     maxFrames_ = bufferFrames_ + 2;
-    inputBuffer_.setSize(kWireChannels, maxFrames_);
-    outputBuffer_.setSize(kWireChannels, maxFrames_);
+    inputBuffer_.setSize(wireChannels_, maxFrames_);
+    outputBuffer_.setSize(wireChannels_, maxFrames_);
     inputBuffer_.clear();
     outputBuffer_.clear();
 
@@ -474,12 +488,12 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   }
 
  private:
-  static std::vector<int> channelsFromMask(const juce::BigInteger& mask) {
+  std::vector<int> channelsFromMask(const juce::BigInteger& mask) const {
     std::vector<int> channels;
-    for (int i = 0; i < kWireChannels; ++i)
+    for (int i = 0; i < wireChannels_; ++i)
       if (mask[i]) channels.push_back(i);
     if (channels.empty())
-      for (int i = 0; i < kWireChannels; ++i) channels.push_back(i);
+      for (int i = 0; i < wireChannels_; ++i) channels.push_back(i);
     return channels;
   }
 
@@ -501,13 +515,13 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     for (int ch = 0; ch < inChannels; ++ch) {
       const int wire = inputMap_[static_cast<size_t>(ch)];
       auto* dst = inputBuffer_.getWritePointer(ch);
-      for (int f = 0; f < frames; ++f) dst[f] = in[f * kWireChannels + wire];
+      for (int f = 0; f < frames; ++f) dst[f] = in[f * wireChannels_ + wire];
     }
     for (int ch = 0; ch < outChannels; ++ch) outputBuffer_.clear(ch, 0, frames);
 
     if (auto* callback = callback_.load()) {
-      std::array<const float*, kWireChannels> ins{};
-      std::array<float*, kWireChannels> outs{};
+      std::array<const float*, kMaxWireChannels> ins{};
+      std::array<float*, kMaxWireChannels> outs{};
       for (int ch = 0; ch < inChannels; ++ch) ins[static_cast<size_t>(ch)] =
           inputBuffer_.getReadPointer(ch);
       for (int ch = 0; ch < outChannels; ++ch) outs[static_cast<size_t>(ch)] =
@@ -518,9 +532,15 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     }
 
     for (int f = 0; f < frames; ++f) {
-      for (int wire = 0; wire < kWireChannels; ++wire) {
-        const int source = wire < outChannels ? wire : 0;
-        out[f * kWireChannels + wire] = outputBuffer_.getSample(source, f);
+      for (int wire = 0; wire < wireChannels_; ++wire) {
+        int source = -1;
+        for (int ch = 0; ch < outChannels; ++ch)
+          if (outputMap_[static_cast<size_t>(ch)] == wire) {
+            source = ch;
+            break;
+          }
+        out[f * wireChannels_ + wire] =
+            source >= 0 ? outputBuffer_.getSample(source, f) : 0.0f;
       }
     }
   }
@@ -567,6 +587,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   std::vector<int> outputMap_{0, 1};
   juce::AudioBuffer<float> inputBuffer_;
   juce::AudioBuffer<float> outputBuffer_;
+  int wireChannels_ = kDefaultWireChannels;
   int bufferFrames_ = 48;
   int packetsPerUrb_ = 8;   // 1 ms at high speed; the selected URB period
   int maxFrames_ = 50;

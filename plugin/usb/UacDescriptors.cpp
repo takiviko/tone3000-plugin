@@ -19,7 +19,10 @@ constexpr uint8_t kDescCsEndpoint = 0x25;
 constexpr uint8_t kCsAcHeader = 0x01;
 constexpr uint8_t kCsInputTerminal = 0x02;
 constexpr uint8_t kCsOutputTerminal = 0x03;
+constexpr uint8_t kCsMixerUnit = 0x04;
+constexpr uint8_t kCsSelectorUnit = 0x05;
 constexpr uint8_t kCsFeatureUnit = 0x06;
+constexpr uint8_t kCsProcessingUnit = 0x07;
 constexpr uint8_t kCsClockSource = 0x0A;
 constexpr uint8_t kCsClockSelector = 0x0B;
 constexpr uint8_t kCsAsGeneral = 0x01;
@@ -187,8 +190,14 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
                 ent.id = d[3];
                 ent.terminalType = le16(d + 4);
                 // UAC2 Input Terminal (17 bytes): id, type, assoc, bCSourceID,
-                // channels, ... The clock source lives at offset 7.
-                if (uac2Entities && bLength >= 8) ent.cSourceId = d[7];
+                // channels, ... The clock source lives at offset 7 and
+                // bNrChannels at offset 8. UAC1 carries it at offset 7.
+                if (uac2Entities && bLength >= 8) {
+                  ent.cSourceId = d[7];
+                  if (bLength >= 9) ent.channels = d[8];
+                } else if (!uac2Entities && bLength >= 8) {
+                  ent.channels = d[7];
+                }
               }
               break;
             case kCsOutputTerminal:
@@ -200,6 +209,26 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
                 // bCSourceID at offset 8 (the 12-byte form).
                 ent.sourceId = d[7];
                 if (uac2Entities && bLength >= 9) ent.cSourceId = d[8];
+              }
+              break;
+            case kCsMixerUnit:
+            case kCsSelectorUnit: {
+              // UAC2 mixer/selector: bUnitID then bNrInPins + baSourceID[].
+              // Kept as `other`; the channel-resolution pass walks them.
+              if (bLength >= 5) {
+                ent.kind = Entity::Kind::other;
+                ent.id = d[3];
+                const uint8_t pins = d[4];
+                for (uint8_t i = 0; i < pins && 5 + i < bLength; ++i)
+                  ent.pins.push_back(d[5 + i]);
+              }
+              break;
+            }
+            case kCsProcessingUnit:
+              if (bLength >= 5) {
+                ent.kind = Entity::Kind::other;
+                ent.id = d[3];
+                ent.sourceId = d[4];
               }
               break;
             case kCsFeatureUnit:
@@ -291,6 +320,49 @@ bool parseConfig(const uint8_t* data, size_t len, ConfigTree& out) {
     }
 
     pos += bLength;
+  }
+
+  // UAC2 Type I formats omit the channel count: it lives on the terminal the
+  // AS interface links to (bTerminalLink). A capture AS links to the USB
+  // streaming output terminal, so follow its source to the input terminal
+  // that owns bNrChannels. This makes multichannel devices (the EVO8 is
+  // 6-in/6-out) describe correctly instead of reporting 0 ch. UAC1 already
+  // carries bNrChannels in the format descriptor, so leave it alone.
+  if (uac2Entities)
+  for (auto& alt : out.altSettings) {
+    if (!alt.isAudioStreaming() || !alt.format.present || alt.terminalLink == 0)
+      continue;
+    const auto findEntity = [&out](uint8_t id) -> const Entity* {
+      for (const auto& ent : out.entities)
+        if (ent.id == id) return &ent;
+      return nullptr;
+    };
+    const Entity* e = findEntity(alt.terminalLink);
+    // Walk OT -> feature/mixer/selector/processing -> input terminal. The
+    // EVO8's capture runs OT 22 -> mixer 60 -> mic terminal 1, for example.
+    for (int depth = 0; e != nullptr && depth < 8; ++depth) {
+      if (e->kind == Entity::Kind::inputTerminal) break;
+      const Entity* next = nullptr;
+      if (e->sourceId != 0) {
+        next = findEntity(e->sourceId);
+      } else if (e->pins.size() == 1) {
+        next = findEntity(e->pins[0]);
+      }
+      if (next == nullptr) break;
+      e = next;
+    }
+    if (e != nullptr && e->kind == Entity::Kind::inputTerminal && e->channels > 0) {
+      alt.format.channels = e->channels;
+    } else if (alt.format.channels == 0) {
+      // Vendor DSP graphs (the EVO8's extension units) can be opaque after a
+      // mixer. The stream cannot carry more channels than the largest input
+      // terminal, which is a sound upper bound for the AS description.
+      uint8_t maxChannels = 0;
+      for (const auto& ent : out.entities)
+        if (ent.kind == Entity::Kind::inputTerminal && ent.channels > maxChannels)
+          maxChannels = ent.channels;
+      if (maxChannels > 0) alt.format.channels = maxChannels;
+    }
   }
 
   return true;

@@ -4,8 +4,15 @@
 // two packings the AMS-22-class devices use (plan section 6.1):
 //
 //   subslot 3: packed 3 bytes per sample, little-endian 24-bit signed
-//   subslot 4: 4 bytes per sample, low 3 bytes significant (24 valid bits),
-//              top byte padding
+//   subslot 4: 4 bytes per sample, sample left-justified in the 32-bit word
+//              (value << 8): bytes 1..3 carry the 24-bit sample, byte 0 is
+//              padding. This matches Linux snd-usb-audio, which exposes a
+//              bSubslotSize-4 stream as SNDRV_PCM_FORMAT_S32_LE and therefore
+//              carries 24-bit content at full 32-bit scale. Devices read the
+//              word the same way (verified on Audient EVO8 and Zoom AMS-22:
+//              right-justified writes came out as a half-rectified,
+//              DC-lifted "square" wave at the analog output while the
+//              byte-transparent digital loopback stayed clean).
 //
 // The plan's rule: read bSubslotSize from the descriptor dump, never guess.
 // Both packings are covered by bit-exact unit tests.

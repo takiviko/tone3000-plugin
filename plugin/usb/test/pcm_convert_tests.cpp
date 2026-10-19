@@ -35,21 +35,26 @@ TEST(PcmConvert, Packed24ByteOrderIsLittleEndian) {
   EXPECT_EQ(wire[2], 0x12);
 }
 
-TEST(PcmConvert, Slot24In32UsesLowThreeBytes) {
+TEST(PcmConvert, Slot24In32IsLeftJustified) {
+  // The 24-bit value sits in bytes 1..3 (word = value << 8); byte 0 is
+  // padding. Devices read the slot at 32-bit scale (ALSA S32_LE), so a
+  // low-3-bytes write would play as a half-rectified wave (plan: the AMS-22
+  // "square output" and the EVO8 input fuzz were this bug).
   const float f = pcm::int24ToFloat(0x123456);
   uint8_t wire[4] = {0xAA, 0xAA, 0xAA, 0xAA};
   pcm::floatToWire(&f, wire, 1, 1, 4);
-  EXPECT_EQ(wire[0], 0x56);
-  EXPECT_EQ(wire[1], 0x34);
-  EXPECT_EQ(wire[2], 0x12);
-  EXPECT_EQ(wire[3], 0x00);  // padding byte is zeroed
+  EXPECT_EQ(wire[0], 0x00);  // padding byte is zeroed
+  EXPECT_EQ(wire[1], 0x56);
+  EXPECT_EQ(wire[2], 0x34);
+  EXPECT_EQ(wire[3], 0x12);
   float out = 0;
   pcm::wireToFloat(wire, &out, 1, 1, 4);
   EXPECT_EQ(pcm::floatToInt24(out), 0x123456);
 }
 
 TEST(PcmConvert, NegativeValuesSignExtendInBothPackings) {
-  // -1 = 0xFFFFFF packed; the padding byte of a 4-byte slot must not leak in.
+  // -1 = 0xFFFFFF packed / 0xFFFFFF00 slotted; the padding byte of a 4-byte
+  // slot must not leak in as sign or magnitude.
   const float f = pcm::int24ToFloat(-1);
   uint8_t packed[3], slot[4] = {0xFF, 0xFF, 0xFF, 0xFF};
   pcm::floatToWire(&f, packed, 1, 1, 3);

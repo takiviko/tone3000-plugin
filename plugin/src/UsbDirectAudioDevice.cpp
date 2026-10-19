@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -31,7 +32,6 @@ using usb::StreamConfig;
 using usb::UsbAudioStream;
 using usb::android::UsbfsTransport;
 
-constexpr int kPacketsPerUrb = 8;   // 1 ms at high speed
 constexpr int kUrbsInFlight = 4;    // 3 misses the OUT slot ~2% of the time
 constexpr int kWireChannels = 2;
 constexpr const char* kTypeName = "USB Direct";
@@ -250,14 +250,22 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   }
 
   juce::Array<int> getAvailableBufferSizes() override {
-    return {kPacketsPerUrb * (config_.sampleRate == 96000 ? 12 : 6)};
+    // The callback period is one URB: 1, 2, 3 or 4 ms. At high speed a packet
+    // carries sampleRate/8000 frames, so 8/16/24/32 packets give 48/96/144/192
+    // frames at 48 kHz (96/192/288/384 at 96 kHz). Longer periods relax the
+    // DSP deadline and add exactly that much latency.
+    const int framesPerPacket =
+        juce::jmax(1, static_cast<int>(config_.sampleRate) / 8000);
+    juce::Array<int> sizes;
+    for (int packets : {8, 16, 24, 32}) sizes.add(packets * framesPerPacket);
+    return sizes;
   }
 
   int getDefaultBufferSize() override { return getAvailableBufferSizes()[0]; }
 
   juce::String open(const juce::BigInteger& inputChannels,
                     const juce::BigInteger& outputChannels, double sampleRate,
-                    int /*bufferSizeSamples*/) override {
+                    int bufferSizeSamples) override {
     close();
     lastError_.clear();
 
@@ -268,6 +276,10 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     }
 
     sampleRate_ = sampleRate;
+    // The packet cadence and the SET_CUR rate both come from config_, so it
+    // must track the requested rate before applyControl() and before the
+    // frames-per-packet calculation (else 96 kHz streams 48 kHz packets).
+    config_.sampleRate = static_cast<uint32_t>(sampleRate);
     const int fd = openJavaDevice();
     if (fd < 0) {
       lastError_ = "USB audio device unavailable (is it attached and permitted?)";
@@ -305,7 +317,24 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     inputMap_ = channelsFromMask(inputChannels);
     outputMap_ = channelsFromMask(outputChannels);
     const int framesPerPacket = config_.nominalFramesPerPacket(config_.speed);
-    bufferFrames_ = kPacketsPerUrb * framesPerPacket;
+    // Buffer size = one URB. Snap the request to the supported periods
+    // (8/16/24/32 packets = 1/2/3/4 ms at high speed); 0 means the 1 ms
+    // default. A remembered generic value like 128 lands on 2 ms rather than
+    // a packet count the UI cannot express.
+    const int requestedPackets =
+        bufferSizeSamples > 0
+            ? (bufferSizeSamples + framesPerPacket / 2) / framesPerPacket
+            : 8;
+    packetsPerUrb_ = 8;
+    int bestDelta = std::abs(8 - requestedPackets);
+    for (int candidate : {16, 24, 32}) {
+      const int delta = std::abs(candidate - requestedPackets);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        packetsPerUrb_ = candidate;
+      }
+    }
+    bufferFrames_ = packetsPerUrb_ * framesPerPacket;
     maxFrames_ = bufferFrames_ + 2;
     inputBuffer_.setSize(kWireChannels, maxFrames_);
     outputBuffer_.setSize(kWireChannels, maxFrames_);
@@ -313,7 +342,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     outputBuffer_.clear();
 
     UsbAudioStream::Options options;
-    options.packetsPerUrb = kPacketsPerUrb;
+    options.packetsPerUrb = packetsPerUrb_;
     options.urbsInFlight = kUrbsInFlight;
     // 128 frames at 48 kHz is 2.7 ms, of which the pacer targets half. This
     // was measured against 512 (8.9 ms RTL) and 96 (no further gain):
@@ -340,7 +369,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     open_ = true;
     juce::Logger::writeToLog("USB Direct: open " + juce::String(sampleRate_, 0) +
                              " Hz, " + juce::String(bufferFrames_) + "-frame blocks, " +
-                             juce::String(kPacketsPerUrb) + "x" +
+                             juce::String(packetsPerUrb_) + "x" +
                              juce::String(kUrbsInFlight) + " URBs, ring " +
                              juce::String(static_cast<int>(options.ringFrames)));
     return {};
@@ -524,6 +553,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   juce::AudioBuffer<float> inputBuffer_;
   juce::AudioBuffer<float> outputBuffer_;
   int bufferFrames_ = 48;
+  int packetsPerUrb_ = 8;   // 1 ms at high speed; the selected URB period
   int maxFrames_ = 50;
   double sampleRate_ = 48000.0;
   int fd_ = -1;

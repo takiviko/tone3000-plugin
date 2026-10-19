@@ -342,6 +342,12 @@ input/output latency, the xrun count and (USB Direct only) clock drift, and
 the app log gets one `[AudioSettings] ...` line per device change with the
 same readback. These are the device's own numbers, not the requested setup.
 
+**Buffer size:** Settings -> Audio Interface -> Buffer size offers the
+URB period: **1, 2, 3 or 4 ms** (48/96/144/192 frames at 48 kHz). The
+selected period is both the USB URB size and the DSP callback block, so a
+longer period relaxes the 1 ms deadline and adds exactly that much latency.
+The packet cadence itself stays 125 us. Default is 1 ms.
+
 **Debug builds:** Gradle's debug variant defaults to `-O0`. That is not
 usable for latency work: a 48-frame callback has a 1 ms deadline, and an
 unoptimized NAM chain misses it (measured: ~900 capture frames/s dropped

@@ -20,6 +20,12 @@ deliberately uncommitted).
   two-model NAM chain. `plugin/CMakeLists.txt` links an interface target that
   places `-O3` after JUCE's `-g -O0`; verify `build.ninja` has it before
   trusting any performance number from a debug APK.
+- **Buffer size is selectable:** 1, 2, 3 or 4 ms (48/96/144/192 frames at
+  48 kHz). The period is both the URB size and the DSP callback block, so it
+  trades deadline headroom for latency directly. Default 1 ms.
+- Opening at 96 kHz now updates the device clock and packet cadence before
+  `applyControl`; previously the config stayed at 48 kHz while the app
+  requested 96 kHz.
 - **The L2 end-to-end number is still unmeasured.** The development AMS-22
   now passes direct monitor but not USB playback at either rear line
   output (its headphone output works), on both hosts, with firmware 1.10.

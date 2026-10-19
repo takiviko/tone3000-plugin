@@ -15,6 +15,11 @@ constexpr int kErrConnReset = -104;  // after DISCARDURB: expected at stop()
 constexpr int kErrShutdown = -108;   // device unplugged
 constexpr int kErrNoDevice = -19;
 
+// The explicit feedback endpoint keeps its own cadence: the AMS-22 reports
+// every 4 microframes, so 8 packets (4 ms) is enough resolution for pacing
+// regardless of the selected audio buffer period.
+constexpr int kFeedbackPackets = 8;
+
 bool isDeviceGone(int status) {
   return status == kErrShutdown || status == kErrNoDevice;
 }
@@ -68,11 +73,11 @@ void UsbAudioStream::prepareFeedbackUrb(Urb& urb) {
   urb.status = 0;
   urb.isFeedback = true;
   urb.endpoint = config_.feedbackEndpoint;
-  urb.packetLengths.assign(options_.packetsPerUrb,
+  urb.packetLengths.assign(kFeedbackPackets,
                            std::max<uint8_t>(config_.feedbackBytes, 1));
-  urb.packetActual.assign(options_.packetsPerUrb, 0);
-  urb.packetStatus.assign(options_.packetsPerUrb, 0);
-  urb.buffer.assign(static_cast<size_t>(urb.packetLengths[0]) * options_.packetsPerUrb,
+  urb.packetActual.assign(kFeedbackPackets, 0);
+  urb.packetStatus.assign(kFeedbackPackets, 0);
+  urb.buffer.assign(static_cast<size_t>(urb.packetLengths[0]) * kFeedbackPackets,
                     0);
 }
 

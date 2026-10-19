@@ -144,3 +144,21 @@ excluded. The L2 e2e number remains unmeasured until then.
 
 The probe soak is also blocked: it needs the AMS, and the unit is out for
 service.
+
+## 2026-10-19: ANR when leaving USB Direct or selecting the AMS on Oboe
+
+Two settings transitions blocked the message thread long enough to ANR the
+app (input dispatch timed out after 10 s). The ANR traces show `main` inside
+`aaudio::AAudioBinderClient::openStream` -> `BpAAudioService::openStream`,
+with the audio HAL at ~40% CPU: AAudio was trying to open the AMS through
+the kernel driver, which is still detached after USB Direct released the
+interface. Only a physical replug rebinds `snd-usb-audio`.
+
+Guard added: `setDeviceType()` refuses USB Direct -> another type while a
+device is open, and `setDevice()` refuses selecting an AMS-22 on a
+non-USB-Direct type when `USBDEVFS_GETDRIVER` on interface 0 reports no
+driver. Both return an inline "Replug the AMS-22" error instead of hanging.
+The driver check is exposed through
+`UsbDirectBridge.kernelDriverBound()` -> `nativeKernelDriverBound(fd)`
+(`plugin/usb/android/UsbfsTransport::getDriver(0)`). Host/desktop/Android
+builds are green; the guard itself needs a device cycle to verify.

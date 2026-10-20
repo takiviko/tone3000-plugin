@@ -8,7 +8,7 @@ deliberately uncommitted).
 
 ## Status (2026-10-19)
 
-- Driver core is host-tested (77/77) and runs on-device: 48-frame callback,
+- Driver core is host-tested (80/80) and runs on-device: 48-frame callback,
   8 packets x 4 URBs, 128-frame ring, 48 kHz. Measured **5.52 ms
   digital-loop RTL**, zero URB xruns at that layout.
 - The app integrates it as the "USB Direct" driver type; Oboe remains the
@@ -29,13 +29,20 @@ deliberately uncommitted).
 - **A second interface (EVO8) parses and streams generically now**: UAC2
   terminal channel counts are resolved (6-in/6-out), the shell uses the
   stream's channel count, and the output pair maps onto the wire channels.
-- **App startup is slow (~30 s to first paint)** and opens the default
-  (Oboe) device before the selected type; when the kernel driver is detached
-  that open blocks the whole launch. See the plan's 2026-10-19 handoff.
-- **The L2 end-to-end number is still unmeasured.** The development AMS-22
-  now passes direct monitor but not USB playback at either rear line
-  output (its headphone output works), on both hosts, with firmware 1.10.
-  That is a unit fault; see `m3-report.md`. The driver is unaffected.
+- **App startup opens the default (Oboe) device before the selected type**;
+  when the kernel driver is detached that open blocks the whole launch
+  (workaround: unplug the USB interface, launch, replug). Cold launch was
+  2m16s before `f53bf9c` (the DSP worker pool spawned AAudio streams per
+  core), 15.3 s after. Fixing the startup order (honour the remembered
+  device type before `AudioDeviceManager::initialise`) is the remaining P0
+  for upstream.
+- **Latency verdict (2026-10-19): accepted in play.** The user runs the full
+  chain through USB Direct on the tablet and reports the monitoring latency
+  is "excellent". An external PC-rig end-to-end measurement was attempted
+  across several sessions and dropped 2026-10-19 as unreliable (see the
+  measurement-method note below); it is not part of this project's evidence.
+  What remains owed from the plan: the 60-minute screen-off soak and the
+  final report.
 
 ## Probe app (M1)
 
@@ -67,52 +74,34 @@ what each interface's kernel driver was beforehand.
 
 ## Measurement method
 
-Two complementary rigs (plan section 4):
+- **L1 device self-measurement** (probe `rtl`/`sweep` modes): the AMS-22's
+  digital loopback mixes playback into capture, so the probe measures our
+  own buffering directly — 5.52 ms at the shipping layout. This is the
+  number to optimize against.
+- **L3 soak/robustness** (`script/usb-scenarios.sh soak 60 --screen-off`):
+  xruns, ring overruns, drift and packet cadence over long unattended runs.
 
-- **L2 PC rig (ground truth).** This PC (Audient EVO8) is both source and
-  recorder, so its own latency cancels. `script/rtl_pc.py` plays a 2 ms
-  exponential sine sweep at -12 dBFS and records two channels:
+An external PC-rig end-to-end method (play a burst, record it after the
+tablet path, cross-correlate against a reference cable) existed here and was
+**dropped 2026-10-19**: on that rig the measurement could not be made
+trustworthy (see the gotchas below), and the user's on-device verdict
+("latency is excellent", 2026-10-19) is the accepted end-to-end evidence.
 
-  ```
-  EVO8 Out 3 (PA out ch2) ──> AMS-22 IN      ──> [tablet path] ──> AMS-22 OUT ──> EVO8 In 4 (PA cap ch2)  path
-  EVO8 Out 4 (PA out ch3) ────────────────────────────────────────────────────> EVO8 In 3 (PA cap ch3)  reference
-  ```
+Device fact: **the AMS-22 feeds its input to its output at ~1 ms regardless
+of its direct-monitor and loopback switches** (proven 2026-10-17: the
++1.08 ms correlation peak survives with the monitoring app force-stopped
+and both switches off). Any external measurement of the device's output sees
+that hardware feed alongside the app's path.
 
-  `rtl = (argmax xcorr(path) - argmax xcorr(ref)) / rate`. Per-trial CSV in
-  the `results-*.csv` files. The peak/next-lobe ratio sanity metric must stay
-  above 3.0 (measured values are > 100). Use
-  `--out-channels 2,3 --ref-channel 3 --path-channel 2 --in-channels 4` with
-  the EVO devices named explicitly. AMS-22 direct monitor OFF and digital
-  loopback OFF for every run (the plan's D5 rules).
-
-- **L1 device self-measurement** (RTL with the AMS-22's digital loopback ON)
-  arrives with the probe app at M1; it measures our own buffering only.
-
-**The AMS-22 feeds its input to its output at ~1 ms regardless of its
-direct-monitor and loopback switches** (proven 2026-10-17: the +1.08 ms
-correlation peak survives with the monitoring app force-stopped and both
-switches off). That hardware peak is stronger than the app path and wins a
-naive argmax, so `rtl_pc.py --window-ms 30,300` selects the app-path peak in
-its expected window instead. The same day's baseline at "pretty low" input
-gain picked the app peak only because the hardware feed was attenuated.
-
-Rig gotchas learned the hard way (see `results-baseline-oboe-bypass.txt`
-header): the EVO8's hardware matrix is a **mixer**, so the PipeWire channel
-to physical-jack mapping depends on the card profile and on the evo-control
-mixer rows. Measured 2026-10-19 with `analog-surround-51` and the second mix
-carrying PC Out 3+4: PipeWire **out ch2 = Out 3, ch3 = Out 4**, and capture
-**ch2 = In 4, ch3 = In 3** (the capture channels are swapped relative to the
-jack numbers). Re-run the per-leg tone check below after any profile or
-mixer change:
-
-```sh
-# each leg separately: play a tone on one output channel, record all inputs
-./script/usb-scenarios.sh doctor   # or use the probe's dump/stream
-```
-
-The AMS-22 also feeds its input to its output at ~1 ms regardless of its
-direct-monitor switch, so the path capture always contains that early peak;
-`--window-ms 2,200` keeps it out of the app-path search.
+PC-rig gotchas, kept for the record (see also
+`results-baseline-oboe-bypass.txt` header): the EVO8's hardware matrix is a
+**mixer**, so the PipeWire channel-to-jack mapping depends on the card
+profile and the evo-control mixer rows. Worse, evo-control's capture routing
+can starve the USB capture of the analog inputs entirely: the 2-output/DAW
+preset routes the PC's own playback back into the capture instead — a
+bit-perfect unity copy with no noise floor, easy to mistake for a real path.
+A real analog capture channel shows a noise floor and the preamp's gain
+setting; verify that with a tone before believing any capture on that rig.
 
 ## Latency budget: current Oboe path (M0 baseline)
 
@@ -173,10 +162,24 @@ Raw evidence: `results-baseline-oboe-bypass.{txt,csv}`,
 | `results-baseline-oboe-dumpsys.txt` | audio_flinger / audio_policy / logcat during streaming |
 | `ams22-descriptors.md` | AMS-22 descriptor dump and entity graph (M1.3) |
 | `m1-report.md` | M1 probe spike go/no-go (M1.7) |
-| `results-integration.txt` | TONE3000 through USB Direct vs baseline (M3.7) |
 
 ## Supported devices
 
 | Device | USB class | Status |
 | --- | --- | --- |
-| Zoom AMS-22 | UAC2, explicit feedback | driver core complete (M2): 8x4/128, 5.52 ms digital RTL; USB Direct runs on-device at 48-frame blocks, zero xruns (M3); L2 e2e pending the EVO capture rig (`m3-report.md`) |
+| Zoom AMS-22 (VID 0x1686, PID 0x066F) | UAC2, explicit feedback | driver core complete (M2): 8x4/128, 5.52 ms digital RTL; USB Direct runs on-device at 48-frame blocks, zero xruns (M3); accepted in play 2026-10-19 ("latency is excellent") |
+
+Quirk registry (`plugin/usb/UsbQuirks.{h,cpp}`, keyed by VID/PID; seed
+entries come from what the probe dump actually observed — never speculate):
+
+| Device | Quirk | Value |
+| --- | --- | --- |
+| Zoom AMS-22 | ignore interfaces | 3 (a second AudioControl block), 4 (MIDI over bulk) |
+| Zoom AMS-22 | settle delay after SET_INTERFACE | 0 ms |
+| Zoom AMS-22 | force 24-in-32 subslot | no |
+
+Observed device behavior worth knowing: no UAC2 feature unit (gain is
+hardware-only — there is no playback volume/mute control to set); UAC2
+GET_CUR rate readback STALLs, so verify the rate through feedback and
+cadence; and it has a hardwired input-to-output monitor feed at ~1 ms
+regardless of its direct-monitor and loopback switches.

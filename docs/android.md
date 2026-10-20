@@ -331,10 +331,9 @@ dir); `--ez usbDirect false` clears it. Grant the USB permission once in a
 normal launch first, then relaunch with the marker.
 
 **Measurement:** the probe's `script/usb-scenarios.sh` measures the driver
-core (digital-loop RTL, xruns, drift, screen-off soaks); the PC rig's
-`script/rtl_pc.py` measures the full app path. Current core numbers at the
-shipping layout (8 packets x 4 URBs, 128-frame ring, 48 kHz): 7,990
-packets/s (nominal 8,000), zero xruns/overruns, **5.52 ms digital-loop
+core (digital-loop RTL, xruns, drift, screen-off soaks). Current core
+numbers at the shipping layout (8 packets x 4 URBs, 128-frame ring, 48 kHz):
+7,990 packets/s (nominal 8,000), zero xruns/overruns, **5.52 ms digital-loop
 RTL**. Full evidence: `plugin/docs/usb-audio/`.
 
 **Diagnostics:** Settings -> Audio Interface shows the device's reported
@@ -364,11 +363,11 @@ still holds the AMS-22; `plugin/docs/usb-audio/m3-report.md` records the
 state and the workaround. Leaving USB Direct, or selecting the AMS on Oboe
 while `snd-usb-audio` is detached, is refused with a "Replug the AMS-22"
 error: AAudio's open would otherwise block inside the audio HAL and ANR the
-app. The development AMS-22's **rear line outputs**
-currently pass direct monitor but not USB playback (its headphone output
-does), so the L2 end-to-end number is deferred until that unit is repaired
-or replaced; the driver-side numbers are unaffected. Do not treat USB Direct
-as production-ready until the L2 e2e number is verified on the tablet.
+app. The AMS-22 has a hardwired input-to-output monitor feed (~1 ms,
+independent of its monitor switches), which any external measurement of the
+device's output sees alongside the app's own path. The rig is accepted in
+play: the user runs the full chain through USB Direct on the tablet and
+reports the monitoring latency is "excellent" (2026-10-19).
 
 ## Known gaps
 

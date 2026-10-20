@@ -495,6 +495,13 @@ if (NOT HEADLESS)
         # below) since neither needs anything from the NDK sysroot.
         target_sources(${PROJECT_NAME} PRIVATE src/WindowKeyEvents.cpp)
         target_sources(${PROJECT_NAME} PRIVATE src/AudioPermissions.cpp)
+        # USB Direct (plan M3): raw usbfs transport + juce::AudioIODevice.
+        target_sources(${PROJECT_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/usb/android/UsbfsTransport.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/UsbDirectAudioDevice.cpp)
+        target_include_directories(${PROJECT_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR})
+        target_link_libraries(${PROJECT_NAME} PRIVATE t3k_usb_audio)
     else()
         # Space passthrough to the host DAW (see WindowKeyEvents.cpp).
         target_sources(${PROJECT_NAME} PRIVATE src/WindowKeyEvents.cpp)
@@ -724,3 +731,22 @@ endif()
 
 # Visual Studio Only
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/..) 
+
+# Gradle's debug variant compiles native code at -O0. For the DSP that is not
+# a cosmetic difference: a 48-frame USB Direct callback has a 1 ms deadline,
+# and an unoptimized NAM model (plus a second model and an IR) misses it often
+# enough to overrun the capture ring. Keep debug symbols and asserts, optimize
+# the audio path. Same rationale and idiom as android/probe/src/main/cpp.
+#
+# JUCE's juce_recommended_config_flags adds "$<Debug:-g -O0>" as an *interface*
+# option, so a plain target-level -O3 lands before it and loses. Linking our
+# own interface target last makes -O3 the final optimizer flag.
+if (T3K_ANDROID AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_library(t3k_debug_o3 INTERFACE)
+    target_compile_options(t3k_debug_o3 INTERFACE -O3)
+    target_link_libraries(${PROJECT_NAME} PRIVATE t3k_debug_o3)
+    if (TARGET NAM)
+        target_compile_options(NAM PRIVATE -O3)
+        target_link_libraries(NAM PRIVATE t3k_debug_o3)
+    endif()
+endif()

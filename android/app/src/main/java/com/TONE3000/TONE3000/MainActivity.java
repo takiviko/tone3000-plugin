@@ -1,9 +1,16 @@
 package com.TONE3000.TONE3000;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Bundle;
+import android.util.Log;
+
+import java.io.File;
+import java.io.IOException;
 
 import com.rmsl.juce.JuceActivity;
 
@@ -17,6 +24,50 @@ public class MainActivity extends JuceActivity
     private static final String ASKED_FOR_NOTIFICATIONS = "asked_for_notifications";
 
     @Override
+    protected void onCreate (Bundle savedInstanceState)
+    {
+        // USB Direct (plan M3): the activity owns the USB permission prompt.
+        // Register *before* super.onCreate: JUCE can build the standalone
+        // holder/editor from the native onCreate, and the settings type scan
+        // needs a live UsbManager by then.
+        UsbDirectBridge.register (this);
+
+        // Debug hook for the automated M3 measurement: create or remove the
+        // marker the native side reads when registering the device type.
+        // adb shell am start -n .../.MainActivity --ez usbDirect true
+        Intent intent = getIntent();
+
+        if (isDebuggable() && intent != null && intent.hasExtra ("usbDirect"))
+        {
+            File marker = new File (getDataDir(), "usb_direct_test");
+
+            try
+            {
+                if (intent.getBooleanExtra ("usbDirect", false))
+                {
+                    if (! marker.exists())
+                        marker.createNewFile();
+                }
+                else
+                {
+                    marker.delete();
+                }
+            }
+            catch (IOException e)
+            {
+                Log.w ("TONE3000", "USB Direct: could not write the test marker", e);
+            }
+        }
+
+        super.onCreate (savedInstanceState);
+    }
+
+    private boolean isDebuggable()
+    {
+        return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    @Override
     protected void onResume()
     {
         super.onResume();
@@ -26,6 +77,7 @@ public class MainActivity extends JuceActivity
         // prompt's dismissal is itself a resume. Repeat starts are no-ops
         // beyond refreshing the notification.
         AudioSessionService.startIfPermitted (this);
+        UsbDirectBridge.ensurePermission (this);
 
         requestNotificationsOnce();
     }

@@ -10,7 +10,7 @@ build-ios-device/
 build-android/
 android/local.properties
 android/.gradle/
-android/app/.cxx/
+android/*/.cxx/
 .idea/
 release-build/
 vs-build/
@@ -29,3 +29,6 @@ TONE3000-CERTS/
 notes/
 build-ui/
 build-ui-release/
+
+t3k-usb-low-latency.md
+__pycache__/

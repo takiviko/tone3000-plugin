@@ -308,6 +308,67 @@ token exchange failed with `token_exchange_failed` until both were in.
 - Space/Enter passthrough is a no-op (`WindowKeyEvents.cpp`): the app is its
   own host.
 
+## USB Direct audio driver (experimental)
+
+Android's stock audio path (Oboe -> AAudio -> AudioFlinger -> `snd-usb-audio`)
+measured 88 ms end to end on the Samsung Tab S10 FE + Zoom AMS-22 rig and
+jittered under DSP load. "USB Direct" bypasses that stack: the app claims the
+interface's AudioControl/AudioStreaming interfaces and drives isochronous URBs
+through `USBDEVFS_*` ioctls from native code. Oboe remains available and is
+still the default.
+
+**Enable it:** Settings -> Audio Driver -> **USB Direct** (the picker appears
+when more than one backend is available). The first use shows the standard
+Android USB permission prompt; accepting it is required. The app keeps the
+device claimed while it runs. Releasing the interface does not make the
+kernel's `snd-usb-audio` rebind on this tablet, so switching back to Oboe
+needs a physical replug of the AMS-22.
+
+**Automation:** in debuggable builds,
+`adb shell am start -n com.TONE3000.TONE3000/.MainActivity --ez usbDirect true`
+selects USB Direct on the next launch (the marker lives in the app's data
+dir); `--ez usbDirect false` clears it. Grant the USB permission once in a
+normal launch first, then relaunch with the marker.
+
+**Measurement:** the probe's `script/usb-scenarios.sh` measures the driver
+core (digital-loop RTL, xruns, drift, screen-off soaks). Current core
+numbers at the shipping layout (8 packets x 4 URBs, 128-frame ring, 48 kHz):
+7,990 packets/s (nominal 8,000), zero xruns/overruns, **5.52 ms digital-loop
+RTL**. Full evidence: `plugin/docs/usb-audio/`.
+
+**Diagnostics:** Settings -> Audio Interface shows the device's reported
+input/output latency, the xrun count and (USB Direct only) clock drift, and
+the app log gets one `[AudioSettings] ...` line per device change with the
+same readback. These are the device's own numbers, not the requested setup.
+
+**Buffer size:** Settings -> Audio Interface -> Buffer size offers the
+URB period: **1, 2, 3 or 4 ms** (48/96/144/192 frames at 48 kHz). The
+selected period is both the USB URB size and the DSP callback block, so a
+longer period relaxes the 1 ms deadline and adds exactly that much latency.
+The packet cadence itself stays 125 us. Default is 1 ms.
+
+**Debug builds:** Gradle's debug variant defaults to `-O0`. That is not
+usable for latency work: a 48-frame callback has a 1 ms deadline, and an
+unoptimized NAM chain misses it (measured: ~900 capture frames/s dropped
+with two models plus an IR). `plugin/CMakeLists.txt` links an interface
+target that puts `-O3` after JUCE's `-g -O0` for Android Debug builds; keep
+that in place when measuring, or use a release build.
+
+**Limitations:** the AMS-22 is the only validated device; 44.1/88.2 kHz
+need fractional microframe packets and are not exposed (the app is pinned at
+48 kHz); the AMS-22 does not answer the UAC2 GET_CUR rate readback, so the
+set rate is verified through feedback and cadence; UAC1 is host-tested only.
+The first on-device switch can freeze while claiming the interfaces if Oboe
+still holds the AMS-22; `plugin/docs/usb-audio/m3-report.md` records the
+state and the workaround. Leaving USB Direct, or selecting the AMS on Oboe
+while `snd-usb-audio` is detached, is refused with a "Replug the AMS-22"
+error: AAudio's open would otherwise block inside the audio HAL and ANR the
+app. The AMS-22 has a hardwired input-to-output monitor feed (~1 ms,
+independent of its monitor switches), which any external measurement of the
+device's output sees alongside the app's own path. The rig is accepted in
+play: the user runs the full chain through USB Direct on the tablet and
+reports the monitoring latency is "excellent" (2026-10-19).
+
 ## Known gaps
 
 - Only Linux has been used as a build host so far. The macOS and Windows

@@ -40,6 +40,11 @@ struct StreamConfig {
   uint8_t captureEndpoint = 0x81;
   /** Explicit feedback endpoint address, or 0 for implicit feedback. */
   uint8_t feedbackEndpoint = 0;
+  /** The playback data endpoint is isochronous with sync type Synchronous
+      (bmAttributes bits 3:2 = 11): the device clock is locked to the USB
+      frame clock, so every packet carries exactly the nominal frame count
+      and no pacing trim applies (the Scarlett Solo, 2026-10-28). */
+  bool playbackSynchronous = false;
   /** Explicit feedback format: UAC2 uses 16.16 in 4 bytes, UAC1 uses 10.14
       in 3 bytes (plan section 6.1/6.4). Only meaningful when
       feedbackEndpoint != 0. */

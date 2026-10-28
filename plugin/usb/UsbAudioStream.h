@@ -28,7 +28,8 @@
 // device's real rate scales the playback packet size, and a fill controller
 // trims the residual by +/-1 frame. Without an explicit endpoint the shell
 // leaves feedbackEndpoint = 0 and the PI on the capture ring fill supplies
-// the whole correction (implicit feedback).
+// the whole correction (implicit feedback). A synchronous playback endpoint
+// (config.playbackSynchronous) skips pacing entirely: nominal packets only.
 
 #include <cstdint>
 #include <functional>

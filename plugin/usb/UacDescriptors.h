@@ -35,6 +35,8 @@ struct EndpointInfo {
   /** Explicit feedback endpoint: isochronous with usage type 01 (UAC2 also
       allows interrupt feedback; the quirk registry covers those devices). */
   bool isFeedback() const { return isIsochronous() && usageType() == 0x1; }
+  /** Sync type Synchronous: the device clock follows the USB frame clock. */
+  bool isSynchronous() const { return isIsochronous() && syncType() == 0x3; }
   /** Implicit feedback data endpoint (UAC2 usage type 10): pacing comes from
       SOF timestamps / actual lengths, no feedback endpoint exists. */
   bool isImplicitFeedbackData() const { return isIsochronous() && usageType() == 0x2; }

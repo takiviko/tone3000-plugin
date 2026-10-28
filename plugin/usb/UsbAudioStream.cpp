@@ -90,11 +90,17 @@ void UsbAudioStream::preparePlaybackUrb(Urb& urb) {
   urb.packetStatus.assign(options_.packetsPerUrb, 0);
 
   // Pacing: the PI controller on the capture ring fill adjusts the URB total
-  // by +/-1 frame, applied to the last packet (plan section 6.4).
+  // by +/-1 frame, applied to the last packet (plan section 6.4). A
+  // synchronous endpoint takes exactly the nominal count: its clock is the
+  // USB frame clock, so a trimmed packet only drops or doubles a sample, and
+  // the integrator can latch at +1 with the ring pinned at target (every
+  // callback one frame short, 2026-10-28).
   const int nominalTotal = callbackFrames();
-  const int total = std::max(
-      1, clock_.playbackFramesPerPacket(nominalTotal, captureRing_.readAvailable(),
-                                        targetFill_));
+  const int total =
+      config_.playbackSynchronous
+          ? nominalTotal
+          : std::max(1, clock_.playbackFramesPerPacket(
+                            nominalTotal, captureRing_.readAvailable(), targetFill_));
   const int adjust = total - nominalTotal;
 
   size_t bytes = 0;

@@ -277,6 +277,34 @@ TEST(UsbAudioStream, PlaybackPacingCanUseOneExtraFrame) {
   for (uint32_t len : play->packetLengths) EXPECT_EQ(len % kBpf, 0u);
 }
 
+TEST(UsbAudioStream, SynchronousPlaybackIgnoresRingFill) {
+  // Same high ring as above, but a synchronous endpoint follows the USB
+  // frame clock: every playback URB stays at the nominal 48 frames.
+  StreamConfig cfg = testConfig();
+  cfg.playbackSynchronous = true;
+  FakeTransport transport;
+  RecordingCallback cb;
+  UsbAudioStream stream(cfg, {}, transport, cb);
+  ASSERT_TRUE(stream.start());
+
+  for (int i = 0; i < 8; ++i) {
+    Urb* cap = firstOf(transport, /*capture=*/true);
+    ASSERT_NE(cap, nullptr);
+    FakeTransport::fillFull(cap);
+    transport.complete(cap, i * 8);
+    ASSERT_TRUE(stream.pumpOnce(0));
+  }
+
+  Urb* play = firstOf(transport, /*capture=*/false);
+  ASSERT_NE(play, nullptr);
+  FakeTransport::fillFull(play);
+  transport.complete(play, 0);
+  ASSERT_TRUE(stream.pumpOnce(0));
+
+  EXPECT_EQ(cb.frames, 48);
+  for (uint32_t len : play->packetLengths) EXPECT_EQ(len, static_cast<uint32_t>(6 * kBpf));
+}
+
 TEST(UsbAudioStream, PlaybackUnderrunRepeatsAndCounts) {
   FakeTransport transport;
   RecordingCallback cb;

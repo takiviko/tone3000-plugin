@@ -168,6 +168,7 @@ Raw evidence: `results-baseline-oboe-bypass.{txt,csv}`,
 | Device | USB class | Status |
 | --- | --- | --- |
 | Zoom AMS-22 (VID 0x1686, PID 0x066F) | UAC2, explicit feedback | driver core complete (M2): 8x4/128, 5.52 ms digital RTL; USB Direct runs on-device at 48-frame blocks, zero xruns (M3); accepted in play 2026-10-19 ("latency is excellent") |
+| Focusrite Scarlett Solo 3rd gen (VID 0x1235, PID 0x8211) | UAC2, synchronous endpoints, no feedback endpoint | runs on USB Direct (Galaxy S25, 2026-10-28) with nominal playback packets; before that fix the capture-ring PI latched at +1 frame after 40-130 s (`ringUnder` +250/s, crackle). Open: `ringOver` creeps up ~2/min (device clock not exactly SOF-locked; implicit-feedback mirroring is the follow-up), and one callback per 10 s runs 10-12 ms against a 4 ms budget at 192 frames |
 
 Quirk registry (`plugin/usb/UsbQuirks.{h,cpp}`, keyed by VID/PID; seed
 entries come from what the probe dump actually observed — never speculate):

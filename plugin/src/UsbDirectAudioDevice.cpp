@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -204,6 +205,7 @@ bool buildConfig(const std::vector<uint8_t>& raw, double sampleRate, StreamConfi
   cfg.playbackEndpoint = play->dataEndpoint()->address;
   cfg.playbackInterface = play->interfaceNumber;
   cfg.playbackAltsetting = play->altSetting;
+  cfg.playbackSynchronous = play->dataEndpoint()->isSynchronous();
   if (const auto* fb = play->feedbackEndpoint()) cfg.feedbackEndpoint = fb->address;
   if (play->format.subslotBytes != 0) cfg.subslotBytes = play->format.subslotBytes;
   if (play->format.bitResolution != 0) cfg.bitResolution = play->format.bitResolution;
@@ -334,6 +336,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
         " play=0x" + juce::String::toHexString(config_.playbackEndpoint) +
         " cap=0x" + juce::String::toHexString(config_.captureEndpoint) +
         " fb=0x" + juce::String::toHexString(config_.feedbackEndpoint) +
+        " sync=" + juce::String(config_.playbackSynchronous ? 1 : 0) +
         " clock=" + juce::String(static_cast<int>(config_.clockSourceId)));
     transport_ = std::make_unique<UsbfsTransport>(fd_);
     if (!applyControl(*transport_, config_, lastError_)) {
@@ -520,6 +523,7 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     for (int ch = 0; ch < outChannels; ++ch) outputBuffer_.clear(ch, 0, frames);
 
     if (auto* callback = callback_.load()) {
+      const auto callbackStart = std::chrono::steady_clock::now();
       std::array<const float*, kMaxWireChannels> ins{};
       std::array<float*, kMaxWireChannels> outs{};
       for (int ch = 0; ch < inChannels; ++ch) ins[static_cast<size_t>(ch)] =
@@ -529,7 +533,13 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
       juce::AudioIODeviceCallbackContext context;
       callback->audioDeviceIOCallbackWithContext(
           ins.data(), inChannels, outs.data(), outChannels, frames, context);
+      const double ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - callbackStart)
+                            .count();
+      callbackMaxMs_ = std::max(callbackMaxMs_, ms);
     }
+    callbackMinFrames_ = std::min(callbackMinFrames_, frames);
+    callbackMaxFrames_ = std::max(callbackMaxFrames_, frames);
 
     for (int f = 0; f < frames; ++f) {
       for (int wire = 0; wire < wireChannels_; ++wire) {
@@ -545,11 +555,21 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
     }
   }
 
+  // Per-log-window callback diagnostics, touched only on the pump thread
+  // (process() runs inside pumpOnce): the frames the pacer handed the DSP and
+  // the longest JUCE callback, against the block's real-time budget.
+  void resetCallbackWindow() {
+    callbackMinFrames_ = std::numeric_limits<int>::max();
+    callbackMaxFrames_ = 0;
+    callbackMaxMs_ = 0.0;
+  }
+
   void pumpLoop() {
     // SCHED_FIFO is opt-in only (plan risk table); JUCE 9 has no portable
     // helper and the kernel may deny it, so the pump runs at normal priority
     // and the ring/URB depth absorb scheduling jitter.
     auto lastLog = std::chrono::steady_clock::now();
+    resetCallbackWindow();
     while (!stopRequested_.load()) {
       bool progressed = false;
       for (int i = 0; i < 16 && !stopRequested_.load(); ++i) {
@@ -571,7 +591,12 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
             " ringUnder=" + juce::String(static_cast<int>(
                                   stream_->playbackStats().ringUnderruns)) +
             " drift=" + juce::String(stream_->captureStats().driftPpm, 1) + " ppm" +
-            " fb=" + juce::String(stream_->feedbackStats().feedbackValue, 5));
+            " fb=" + juce::String(stream_->feedbackStats().feedbackValue, 5) +
+            " frames=" + juce::String(callbackMaxFrames_ > 0 ? callbackMinFrames_ : 0) + ".." +
+            juce::String(callbackMaxFrames_) +
+            " cbMax=" + juce::String(callbackMaxMs_, 2) + " ms (budget " +
+            juce::String(1000.0 * bufferFrames_ / sampleRate_, 2) + " ms)");
+        resetCallbackWindow();
       }
     }
   }
@@ -580,6 +605,9 @@ class UsbDirectAudioIODevice final : public juce::AudioIODevice,
   std::unique_ptr<UsbfsTransport> transport_;
   std::unique_ptr<UsbAudioStream> stream_;
   std::thread pump_;
+  int callbackMinFrames_ = std::numeric_limits<int>::max();
+  int callbackMaxFrames_ = 0;
+  double callbackMaxMs_ = 0.0;
   std::atomic<bool> stopRequested_{false};
   std::atomic<juce::AudioIODeviceCallback*> callback_{nullptr};
 
